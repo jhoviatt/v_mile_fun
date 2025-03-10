@@ -78,7 +78,7 @@ my_ggsave("ordination.pdf", all_comms_plot, # pdf to allow editing in adobe
 
 # define location of data
 cover_file <- "./Data/Percent_cover.csv"
-traits_file <- "./Data/Data_cleaned/x 2024-07-23 traits_5_mile_clean.csv"
+traits_file <- "./Data/traits_clean.csv"
 meta_file <- "./Data/lacroce_metadata.csv"
 
 # load in data to dataframes
