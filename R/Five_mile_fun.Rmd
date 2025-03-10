@@ -3,29 +3,33 @@ title: "Epibenthic Community Statistics on functional ecology from 5 mile ledge"
 date: "2023"
 author: "Jared Oviatt"
 output:
-  pdf_document: 
-    toc: yes
-    keep_tex: yes
-    fig_height: 6
+  # pdf_document: 
+  #   toc: yes
+  #   keep_tex: yes
+  #   fig_height: 6
   #   toc: TRUE
   #   highlight: "tango"
   #   code_folding: "show"
   #   theme: "yeti"
   # html_document:
-  # word_document:
-      # reference_docx: R/word_reference.docx
+  word_document
 editor_options: 
-  
   chunk_output_type: "console"
-fig_width: 6
-figh_height: 6
+
 ---
 
 ## Initialize
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  out.width = "6.5in"
+)
+```
 
 #### Load libraries
 ```{r Load libraries, include=FALSE, results='hide'}
 library(base)
+library(FactoMineR) # MFA
 library(heatmaply)
 library(lme4)
 library(FD)
@@ -46,41 +50,64 @@ library(vegan) # community stats
 library(tidyverse)
 
 
-source('~/Desktop/Science/R/jho_functions.R')
+source('./R/jho_functions_041523.R')
 ```
 
 #### define new functions
-```{r functions}
+```{r functions, include=FALSE, results='hide'}
 my_ggsave <- function(filename, plot, 
                       device = 'png',
                       path = './Figs/', 
-                      dpi = 300, 
+                      dpi = 360, 
                       units = 'in', 
-                      width = 8, 
-                      height = 8, 
+                      width = 6, 
+                      height = 6, 
                       bg = 'white')
 {
     ggsave(filename, plot, device = device, path = path, dpi = dpi, units = units, width = width, height = height, bg = bg)
 }
+
+is.zero <- function(x){
+    return(as.numeric(!!x))
+}
 ```
 
 #### Set gg theme
-```{r gg setup}
-theme_set(theme_few())
+```{r gg setup, include=FALSE}
+ax_text_size <- 10
+lab_text_size <- 12
+
+theme_set(theme_few() +
+              theme(text = element_text(size = lab_text_size),
+                    axis.text = element_text(size = ax_text_size))) # add standardized theme elements
 #theme_set(darkmode(theme_few()))
 
-ax_text_size <- 12
-lab_text_size <- 14
+
 ```
 
+#### Save Plots
 ```{r save plots, eval=FALSE, include=FALSE}
 
-my_ggsave('Figure_1.png', fig1, height = 6)
-my_ggsave('Figure_2.png', fig2, height = 3, width = 4)
-my_ggsave('Figure_3.png', fig3, height = 9)
-my_ggsave('Figure_4.png', fig4, height = 10)
-my_ggsave('Figure_5.png', fig5, height = 3, width = 4)
-my_ggsave('Dummy_fig.png', legend_fig, width = 10)
+my_ggsave(filename = 'Big_fig.png', fig1)
+my_ggsave(filename = 'Trait_space.png', trait_space_plot)
+my_ggsave(filename = 'Trait_vectors.png', trait_v_fig)
+my_ggsave(filename = 'mfa_vectors.png', mfa_v_plot)
+my_ggsave(filename = 'Smooth_ax.png', smooth_axis_plot)
+my_ggsave(filename = 'Smooth_pc.png', smooth_pc_plot)
+my_ggsave(filename = 'Traits_temp_smooth.png', traits_temp_plot_smooth)
+my_ggsave(filename = 'Traits_temp_lm.png', traits_temp_plot_lm)
+my_ggsave(filename = 'Traits_temp_slopes.png', traits_temp_slopes_plot)
+my_ggsave(filename = 'Traits_time_smooth.png', traits_time_plot_smooth)
+my_ggsave(filename = 'Traits_time_lm.png', traits_time_plot_lm)
+my_ggsave(filename = 'Walk_plot_comm.png', comm_walk_plot)
+my_ggsave(filename = 'Walk_plot_cwm.png', cwm_walk_plot)
+my_ggsave(filename = 'Walk_plot_mfa.png', mfa_walk_plot)
+my_ggsave(filename = 'Richness.png', rich_plot)
+my_ggsave(filename = 'Tax_spread.png', tax_spread_plot)
+my_ggsave(filename = 'Fun_spread.png', fun_spread_plot)
+my_ggsave(filename = 'mfa_spread.png', mfa_spread_plot)
+my_ggsave(filename = 'Trait_influence.png', trait_influence_plot)
+
 
 
 
@@ -89,7 +116,7 @@ my_ggsave('Dummy_fig.png', legend_fig, width = 10)
 ### Load data
 ```{r Load Data and format, include=FALSE, results='hide'}
 cover_file <- "./Data/Percent_cover.csv"
-traits_file <- "./Data/Data_cleaned/x 2024-03-30 traits_5_mile_clean.csv"
+traits_file <- "./Data/Data_cleaned/x 2024-06-07 traits_5_mile_clean.csv"
 meta_file <- "./Data/lacroce_metadata.csv"
 temp_file <- './Data/vmileA_bottomwater_temp_09.XX.15-12.XX.2023.csv'
 cormp_file <- './Data/CORMP_2016_2017.csv'
@@ -107,7 +134,7 @@ par_raw <- read_csv(par_file)
 ```
 
 ### Make comm, tax, env, struc matrices
-```{r Make matrices, echo=FALSE}
+```{r Make matrices, echo=FALSE, results='hide'}
 # Make community, environment, struc matrices and distance matrices 
 comm <- master_cover %>%
     filter(!is.na(`Image.name`)) %>%
@@ -129,6 +156,17 @@ meta <- metadata %>%
     mutate(across(Season:Site, factor))
 
 #comm <- comm[rownames(meta),]
+
+# report community analyzed and species removed with mean abundance
+report_comm <- names(comm) %>% 
+    as.data.frame() 
+names(report_comm) <- c("Species_used")
+# report_comm$Species_original <- names()
+# write.csv(report_comm, file = "./Data/community_used.csv")
+
+```
+
+```{r load environmental data , include=FALSE, results='hide'}
 temp <- temp_raw %>%
     mutate(Date.Time = mdy_hm(Date.Time),
            Date = date(Date.Time),
@@ -141,39 +179,39 @@ temp <- temp_raw %>%
     mutate(Temp_mov = movavg(Temp, n = 14)) %>%
     filter(between(Date, min(meta$Date), max(meta$Date))) %>%
     left_join(rownames_to_column(meta, var = 'Name')) 
-
-cormp <- cormp_raw %>%
-    mutate(Date_Time = mdy_hm(Date_Time),
-           Date = date(Date_Time),
-           Temp_cormp = (Water_temp_F - 32)*5/9) %>%
-    filter(Sal_qual != 'bad' | is.na(Sal_qual)) %>%
-    select(Date, Temp_cormp, Salinity_ppt, Wind_speed, Wind_direction_from, Wave_ht_ft) %>%
-    group_by(Date) %>%
-    mutate(across(Temp_cormp:Wave_ht_ft, ~ mean(.x, na.rm = T))) %>%
-    ungroup() %>%
-    unique() %>%
-    mutate(across(Temp_cormp:Wave_ht_ft, ~ movavg(.x, n = 14), .names = '{.col}_mov')) %>%
-    filter(between(Date, min(meta$Date), max(meta$Date))) %>%
-    left_join(rownames_to_column(meta, var = 'Name')) 
-
-par <- par_raw %>%
-    mutate(Date_Time = mdy_hm(Date_Time),
-           Date = date(Date_Time),
-           PAR = TotPAR) %>%
-    select(-Date_Time, -TotPAR) %>%
-    group_by(Date) %>%
-    mutate(PAR = mean(PAR)) %>%
-    ungroup() %>%
-    unique() %>%
-    mutate(PAR_mov = movavg(PAR, n = 14)) %>%
-    filter(between(Date, min(meta$Date), max(meta$Date)))
+# 
+# cormp <- cormp_raw %>%
+#     mutate(Date_Time = mdy_hm(Date_Time),
+#            Date = date(Date_Time),
+#            Temp_cormp = (Water_temp_F - 32)*5/9) %>%
+#     filter(Sal_qual != 'bad' | is.na(Sal_qual)) %>%
+#     select(Date, Temp_cormp, Salinity_ppt, Wind_speed, Wind_direction_from, Wave_ht_ft) %>%
+#     group_by(Date) %>%
+#     mutate(across(Temp_cormp:Wave_ht_ft, ~ mean(.x, na.rm = T))) %>%
+#     ungroup() %>%
+#     unique() %>%
+#     mutate(across(Temp_cormp:Wave_ht_ft, ~ movavg(.x, n = 14), .names = '{.col}_mov')) %>%
+#     filter(between(Date, min(meta$Date), max(meta$Date))) %>%
+#     left_join(rownames_to_column(meta, var = 'Name')) 
+# 
+# par <- par_raw %>%
+#     mutate(Date_Time = mdy_hm(Date_Time),
+#            Date = date(Date_Time),
+#            PAR = TotPAR) %>%
+#     select(-Date_Time, -TotPAR) %>%
+#     group_by(Date) %>%
+#     mutate(PAR = mean(PAR)) %>%
+#     ungroup() %>%
+#     unique() %>%
+#     mutate(PAR_mov = movavg(PAR, n = 14)) %>%
+#     filter(between(Date, min(meta$Date), max(meta$Date)))
 
 # add salinity and photoperiod too
 env <- temp %>%
-    select(Date, Temp, Temp_mov) %>%
+    select(Date, Temp, Temp_mov, Name) %>%
     unique() %>%
-    left_join(par) %>%
-    left_join(cormp) %>%
+    # left_join(par) %>%
+    # left_join(cormp) %>%
     filter(!is.na(Name)) %>%
     column_to_rownames(var = 'Name')
 
@@ -183,49 +221,23 @@ env <- temp %>%
 ```{r make trait space, echo=FALSE}
 
 trait_space_init <- traits %>%
+    mutate(Color_L = L,
+           Color_a = a,
+           Color_b = b,) %>%
     filter(Complete_but_colorless & !is.na(Color_LAB)) %>%
-    select(-Short_Code, -Abund, -Percent_complete, -Complete_but_colorless)
-
-
-color_frame <- select(trait_space_init, Color_LAB) %>%
-    separate(everything(), c('L', 'a', 'b'), sep = ',') %>%
-    mutate(across(everything(), as.numeric))
-
-# for(i in 2:9){ # I like 7, 8, and 9
-#     k <- i
-#     str(k)
-#     plot(k)
-#     kmean_color <- kmeans(color_frame, k, iter.max = 99999)
-#     hist(kmean_color$cluster)
-#     plot3D::scatter3D(color_frame$a, color_frame$b, color_frame$L, type = 'p', phi = 0, theta = 0, colvar = kmean_color$cluster)
-#     plot3D::scatter3D(color_frame$L, color_frame$a, color_frame$b, type = 'p', phi = 90, theta = 0, colvar = kmean_color$cluster)
-#     plot3D::scatter3D(color_frame$L, color_frame$a, color_frame$b, type = 'p', phi = 0, theta = 90, colvar = kmean_color$cluster)
-# }
-
-k = 8
-kmean_color <- kmeans(scale(color_frame), k, iter.max = 99999)
-trait_space_init$Color_group <- kmean_color$cluster %>%
-    factor(ordered = F)
-color_vect <- kmean_color$centers %>%
-    convertColor(from = "Lab", to = "CIE RGB") %>%
-    as.data.frame() %>%
-    mutate(across(everything(), function(v){as.hexmode(floor(v*255))}),
-        color = paste("#", V1, V2, V3, sep = ''))
-eb_pallet <- color_vect$color
-names(eb_pallet) <- c('1','2','3','4', '5')
+    select(-Short_Code, -Abund, -Percent_complete, -Complete_but_colorless, -Color_LAB, -L, -a, -b)
 
 # format as factors, ordinal factors
 trait_space <- trait_space_init %>%
     mutate(across(Observed_thermal_range:Original_individual, as.factor),
            Height = factor(Height, levels = c('0-10', '10-100', '100-500', '500-1000'), ordered = T),
-           Branched = factor(Branched, levels = c('no', 'infrequent', 'mid', 'frequent'), ordered = T),
-           Shape = factor(Shape, levels = c('encrusting', 'globulose', 'round', 'elongate', 'flattened', 'filamentous'), ordered = T),
+           Branched = factor(Branched, levels = c('no', 'mid', 'frequent'), ordered = T),
+           Shape = factor(Shape, levels = c('encrusting', 'globulose', 'elongate', 'filamentous'), ordered = T),
            Calcified = factor(Calcified, levels = c('no', 'soft', 'flex', 'rigid'), ordered = T)) %>%
-           separate(Observed_thermal_range, c('tmin', 'tmax'), sep = '-') %>%
-    mutate(tmin = as.numeric(tmin),
-           tmax = as.numeric(tmax)) %>%
-    column_to_rownames('Name') %>%
-    select(-Color_LAB)
+           separate(Observed_thermal_range, c('Temp_tmin', 'Temp_tmax'), sep = '-') %>%
+    mutate(Temp_tmin = as.numeric(Temp_tmin),
+           Temp_tmax = as.numeric(Temp_tmax)) %>%
+    column_to_rownames('Name') 
 
 
 # gower dissimilarity
@@ -242,9 +254,10 @@ trait_plot <- trait_pcoa$vectors %>%
 
 ```
 
-```{r fig 3}
+```{r plot spp trait space, echo=FALSE}
 
-fig3 <- ggplot(trait_plot, aes(x = Axis.1, y = Axis.2, color = Axis.3)) +
+# spp first
+trait_space_plot <- ggplot(trait_plot, aes(x = Axis.1, y = Axis.2, color = Axis.3)) +
     geom_label(aes(label = rowname), show.legend = T) +
     xlab('PCoA Axis 1') +
     ylab('PCoA Axis 2') +
@@ -255,10 +268,9 @@ fig3 <- ggplot(trait_plot, aes(x = Axis.1, y = Axis.2, color = Axis.3)) +
           legend.text = element_blank(),
           legend.title = element_text(size = lab_text_size + 2),
           legend.position = 'top')
-fig3
+trait_space_plot
 
 ```
-
 
 ```{r comm weighted trait avgs, echo=FALSE}
 
@@ -277,20 +289,43 @@ env <- env[rownames(cwm),]
 
 ```{r check trait correlations, echo=FALSE}
 
-cwm_cor <- cwm
-names(cwm_cor) <- names(cwm) %>% str_trunc(19, side = 'left')
-cor(cwm_cor) %>%
-    heatmaply_cor()
+# dummy_traits <- trait_space %>%
+#     mutate(across(everything(), ~ as.numeric(.x))) %>%
+#     rownames_to_column(var = 'Species')
+# 
+# cor(dummy_traits) %>%
+#     heatmaply_cor()
+#pairs(dummy_traits, upper.panel = panel.cor)
+# 
+# dummy_traits %>%
+#     pivot_longer(names_to = 'Trait', values_to = 'Value', cols = !Species) %>%
+#     ggplot(aes(x = Trait, y = Value)) +
+#     geom_point() +
+#     geom_smooth() 
+# 
+# cor(dummy_traits) %>%
+#     heatmaply_cor()
+# 
+# dummy_trait_values <- trait_space %>%
+# 
+# cor(cwm) %>%
+#     heatmaply_cor()
+# 
+# #ggpairs(cwm, columns = 1:31)
+# 
+# cwm_long <- cwm %>%
+#     pivot_longer(names_to = 'Trait_value', values_to = 'Value', cols = everything()) %>%
+#     separate(Trait_value, sep = '_', into = c("Trait", "Trait_value"), extra = 'merge')
+# 
+# ggplot(cwm_long, aes(x = Value, fill = Trait_value)) +
+#     geom_density(alpha = 0.5, show.legend = F) +
+#     facet_wrap( ~ Trait, scales = 'free')
 
-trait_space %>%
-    mutate(across(everything(), ~ as.numeric(.x))) %>%
-    cor() %>%
-    heatmaply_cor()
 
 ```
 
 ### Diversity
-```{r diversity}
+```{r diversity, echo=FALSE}
 
 # Functional Diversity
 fun_div <- dbFD(trait_space, fcomm, corr = 'cailliez', CWM.type = 'all') %>%
@@ -298,15 +333,41 @@ fun_div <- dbFD(trait_space, fcomm, corr = 'cailliez', CWM.type = 'all') %>%
     rownames_to_column(var = 'rowname')
 
 # Taxonomic Diveristy (shannon)
-tax_div <- diversity(fcomm, index = 'shannon', ) %>%
+tax_div <- diversity(fcomm, index = 'shannon') %>%
     as.data.frame() %>%
     rename('Shannon' = '.') %>%
     rownames_to_column(var = 'rowname')
 
+rich <- fcomm %>%
+    rownames_to_column() %>%
+    left_join(rownames_to_column(fmeta)) %>%
+    mutate(Month = month(Date, label = T),
+           Year = year(Date),
+           across(`Oculina arbuscula`:`Zonaria tournefortii`, is.zero)) %>%
+    filter(Month %in% c('May', 'Jun', 'Jul', 'Aug', 'Sep'))
+rich$Rich <- rowSums(select(rich, `Oculina arbuscula`:`Zonaria tournefortii`))
+
+rich_plot <- ggplot(rich, aes(x = Year, y = Rich, color = factor(Year))) +
+    geom_boxplot() +
+    facet_wrap(~Month)
+rich_plot
+
+alg_tot <- falgae %>%
+    mutate(Total_alg = rowSums(falgae)) %>%
+    select(Total_alg) %>%
+    rownames_to_column()
+
+inv_tot <- finverts %>%
+    mutate(Total_inv = rowSums(finverts)) %>%
+    select(Total_inv) %>%
+    rownames_to_column()
+
 # combo
 comb_div <- left_join(fun_div, tax_div) %>%
-    left_join(rownames_to_column(fmeta, var = 'rowname')) %>%
-    select(rowname, Date, Site, Season, Quad, RaoQ, Shannon) %>%
+    left_join(rich) %>%
+    left_join(alg_tot) %>%
+    left_join(inv_tot) %>%
+    select(rowname, Date, Site, Season, Quad, RaoQ, Shannon, Rich) %>%
     mutate(RaoQ = scale(RaoQ)[,1],
            Shanon = scale(Shannon)[,1]) %>%
     pivot_longer(cols = c('RaoQ', 'Shannon'), names_to = 'Index', values_to = 'Value')
@@ -344,7 +405,7 @@ seasonal_comm <- fcomm %>%
 seasonal_cwm <- cwm %>%
     mutate(Date = fmeta$Date) %>%
     group_by(Date) %>%
-    mutate(across(tmin:Color_group_8, ~ mean(.x, na.rm = T))) %>%
+    mutate(across(Temp_tmin:Color_b, ~ mean(.x, na.rm = T))) %>%
     ungroup() %>%
     filter(!is.na(Date)) %>%
     unique() %>%
@@ -382,15 +443,14 @@ scwm <- vegdist(seasonal_cwm) %>%
 ```{r plotting set up, echo=FALSE}
 
 plot_cwm <- bind_cols(cwm, meta[rownames(cwm),]) %>%
-    pivot_longer(names_to = 'Trait', values_to = 'Abund', cols = tmin:Color_group_8) %>%
+    pivot_longer(names_to = 'Trait', values_to = 'Abund', cols = Temp_tmin:Color_b) %>%
     mutate(Trait_value = as.character(Trait),
            Trait = case_when(.default = 'no match', 
                              str_detect(Trait_value, 'Height')  ~ 'height', 
                              str_detect(Trait_value, 'Orig')  ~ 'OG', 
                              str_detect(Trait_value, 'Branch')  ~ 'branch', 
                              str_detect(Trait_value, 'Shape')  ~ 'shape', 
-                             str_detect(Trait_value, 'tmin')  ~ 't_min', 
-                             str_detect(Trait_value, 'tmax')  ~ 't_max', 
+                             str_detect(Trait_value, 'Temp')  ~ 'Temp', 
                              str_detect(Trait_value, 'Energy')  ~ 'energy', 
                              str_detect(Trait_value, 'Calcif')  ~ 'calcif', 
                              str_detect(Trait_value, 'Color')  ~ 'color'),
@@ -400,7 +460,7 @@ plot_cwm <- bind_cols(cwm, meta[rownames(cwm),]) %>%
     # ungroup()
 
 ef <- envfit(trait_pcoa$vectors, trait_space)
-trait_vectors <- ef$factors$centroids %>%
+trait_vectors_cat <- ef$factors$centroids %>%
     as.data.frame() %>%
     rownames_to_column(var = 'Trait_value') %>%
     mutate(Trait = case_when(.default = 'no match', 
@@ -408,8 +468,7 @@ trait_vectors <- ef$factors$centroids %>%
                              str_detect(Trait_value, 'Orig')  ~ 'OG', 
                              str_detect(Trait_value, 'Branch')  ~ 'branch', 
                              str_detect(Trait_value, 'Shape')  ~ 'shape', 
-                             str_detect(Trait_value, 'tmin')  ~ 't_min', 
-                             str_detect(Trait_value, 'tmax')  ~ 't_max', 
+                             str_detect(Trait_value, 'Temp')  ~ 'Temp', 
                              str_detect(Trait_value, 'Energy')  ~ 'energy', 
                              str_detect(Trait_value, 'Calcif')  ~ 'calcif', 
                              str_detect(Trait_value, 'Color')  ~ 'color'),
@@ -418,13 +477,36 @@ trait_vectors <- ef$factors$centroids %>%
            Axis.2 = scale(Axis.2)[,1])
 #trait_vectors$p <- ef$factors$pvals
 #trait_vectors$r <- ef$factors$r
+
+trait_vectors_cont <- ef$vectors$arrows %>%
+    as.data.frame() %>%
+    rownames_to_column(var = 'Trait_value') %>%
+    mutate(Trait = case_when(.default = 'no match', 
+                             str_detect(Trait_value, 'Height')  ~ 'height', 
+                             str_detect(Trait_value, 'Orig')  ~ 'OG', 
+                             str_detect(Trait_value, 'Branch')  ~ 'branch', 
+                             str_detect(Trait_value, 'Shape')  ~ 'shape', 
+                             str_detect(Trait_value, 'Temp')  ~ 'Temp', 
+                             str_detect(Trait_value, 'Energy')  ~ 'energy', 
+                             str_detect(Trait_value, 'Calcif')  ~ 'calcif', 
+                             str_detect(Trait_value, 'Color')  ~ 'color'),
+           Trait = as.factor(Trait),
+           Axis.1 = scale(Axis.1)[,1],
+           Axis.2 = scale(Axis.2)[,1])
+
+trait_vectors <- bind_rows(trait_vectors_cat, trait_vectors_cont)
+
 ```
 
-```{r fig4}
-fig4 <- ggplot(trait_vectors, aes(x = Axis.1, y = Axis.2, color = Trait)) +
+```{r trait vectors, echo=FALSE}
+
+# add labels for prominent vectors
+# HOW TO DO THIS FOR TEMP AND COLOR?
+# REDUCE OG CATEGORIES
+trait_v_fig <- ggplot(trait_vectors, aes(x = Axis.1, y = Axis.2, color = Trait)) +
     geom_segment(aes(x = 0, y = 0, xend = Axis.1, yend = Axis.2), arrow = arrow(length = unit(2, 'mm'), type = 'closed'), show.legend = T) +
     scale_color_discrete(name = 'Trait category') +
-    #geom_label(aes(label = rowname), show.legend = F) +
+    geom_label(aes(label = Trait_value), show.legend = F) +
     xlab('PCoA Axis 1') +
     ylab('PCoA Axis 2') +
     theme(axis.text = element_blank(),
@@ -435,8 +517,7 @@ fig4 <- ggplot(trait_vectors, aes(x = Axis.1, y = Axis.2, color = Trait)) +
           #legend.title.position = 'bottom',
           legend.title = element_text(size = lab_text_size + 2),
           legend.text = element_text(size = ax_text_size))
-fig4
-
+trait_v_fig
 ```
 
 ```{r do some plotting, echo=FALSE}
@@ -465,8 +546,8 @@ TCs <- tcs %>%
            Alt = Num %% 2)
 
 plot_env <- env %>%
-    mutate(across(Temp:Wave_ht_ft_mov, ~ scale(.x)[,1])) %>% 
-    pivot_longer(Temp:Wave_ht_ft_mov, names_to = 'Var', values_to = 'Value') %>%
+    mutate(across(Temp:Temp_mov, ~ scale(.x)[,1])) %>% 
+    pivot_longer(Temp:Temp_mov, names_to = 'Var', values_to = 'Value') %>%
     mutate(Var = factor(Var)) %>%
     filter(Var %in% c("Temp_mov", "PAR_mov")) 
 
@@ -517,7 +598,7 @@ mplot
 
 ```
 
-```{r fig 1}
+```{r fig 1, echo=FALSE}
 
 fig1 <- ggarrange(eplot, cplot, mplot, ncol = 1, heights = c(3,3,1))
 fig1
@@ -525,7 +606,7 @@ fig1
 ```
 
 
-## Models - take out sal and waves
+## More plots
 ```{r pca generation and make plots, echo=FALSE}
 
 # cwm_pcoa <- vegdist(cwm, method = 'euclid') %>%
@@ -541,12 +622,55 @@ comm_pcoa_whole <- vegdist(fcomm, method = 'euclid') %>%
     pcoa()
 comm_pcoa <- comm_pcoa_whole$vectors %>%
     as.data.frame()
+##########
+# create an MFA to replace PCoA analysis
+##########
+mfa_group_nums <- c(2, 4, 4, 3, 4, 4, 7, 3)
+mfa_names <- c('temp', 'height', 'shape', 'branched', 'calcified', 'energy', 'OG', 'color')
+#mfa_types <- c('s', 'n', 'n', 'n', 'n', 'n', 'n', 's')
+cwm_mfa_whole <- MFA(cwm, 
+               group = mfa_group_nums,
+               name.group = mfa_names
+               #type = mfa_types # not using bc the cwm are all abundances
+               )
+mfa_contrib <- cwm_mfa_whole$group$contrib %>%
+    as.data.frame() %>%
+    rownames_to_column(var = 'Trait') %>%
+    pivot_longer(names_to = 'Dim', values_to = 'Contribution', cols = Dim.1:Dim.5) %>%
+    mutate(Dim = factor(Dim, levels = c('Dim.1', 'Dim.2', 'Dim.3', 'Dim.4', 'Dim.5')))
+mfa_eig <- cwm_mfa_whole$eig %>%
+    as.data.frame() %>%
+    rownames_to_column(var = 'Dim') %>%
+    mutate(Dim = str_replace(Dim, 'comp ', 'Dim.')) %>%
+    filter(Dim %in% c('Dim.1', 'Dim.2', 'Dim.3', 'Dim.4', 'Dim.5'))
+
+# # simple is just easy to interpret
+# mfa_simplified <- left_join(mfa_contrib, mfa_eig) %>%
+#     group_by(Trait, Dim) %>%
+#     mutate(Trait_influence = Contribution * `percentage of variance` / 100) %>%
+#     group_by(Trait) %>%
+#     mutate(Trait_influence = sum(Trait_influence)) %>%
+#     ungroup() %>%
+#     select(Trait, Trait_influence) %>%
+#     unique()
+
+cwm_mfa<- cwm_mfa_whole$ind$coord %>%
+    as.data.frame()
+
+ggplot(mfa_contrib, aes(x = Trait, y = Contribution, fill = Dim)) +
+    geom_col(color = 'black', position = 'dodge') 
+ggplot(mfa_contrib, aes(x = Trait, y = Contribution, fill = Dim)) +
+    geom_col(color = 'black', position = 'stack')
+ggplot(mfa_contrib, aes(x = Dim, y = Contribution, fill = Trait)) +
+    geom_col(color = 'black', position = 'dodge')
+trait_influence_plot <- ggplot(mfa_contrib, aes(x = Dim, y = Contribution, fill = Trait)) +
+    geom_col(color = 'black', position = 'stack')
 
 # comm_pca <- prcomp(fcomm, scale. = T)$x %>%
 #     as.data.frame()
 
 scale_env <- env %>%
-    mutate(across(Temp:Wave_ht_ft_mov, ~ scale(.x)[,1]))
+    mutate(across(Temp:Temp_mov, ~ scale(.x)[,1]))
 
 plot_cwm_pca <- cwm_pca %>%
     rownames_to_column() %>%
@@ -555,6 +679,13 @@ plot_cwm_pca <- cwm_pca %>%
     filter(PC %in% c('PC1','PC2','PC3','PC4')) %>%
     mutate(PC = factor(PC))
 
+plot_cwm_mfa <- cwm_mfa %>%
+    rownames_to_column() %>%
+    left_join(rownames_to_column(env)) %>%
+    pivot_longer(starts_with("Dim"), names_to = 'Dim', values_to = 'Value') %>%
+    filter(Dim %in% c('Dim.1','Dim.2','Dim.3','Dim.4')) %>%
+    mutate(Dim = factor(Dim))
+
 plot_comm_pcoa <- comm_pcoa %>%
     rownames_to_column() %>%
     left_join(rownames_to_column(env)) %>%
@@ -562,41 +693,194 @@ plot_comm_pcoa <- comm_pcoa %>%
     filter(Axis %in% c('Axis.1','Axis.2','Axis.3','Axis.4')) %>%
     mutate(Axis = factor(Axis))
 
+plot_cwm_env <- rownames_to_column(cwm) %>%
+    left_join(rownames_to_column(env), by = 'rowname') %>%
+    pivot_longer(names_to = 'Trait', values_to = 'Abund', cols = Temp_tmin:Color_b) %>%
+    mutate(Trait_value = as.character(Trait),
+           Trait = case_when(.default = 'no match', 
+                             str_detect(Trait_value, 'Height')  ~ 'height', 
+                             str_detect(Trait_value, 'Orig')  ~ 'OG', 
+                             str_detect(Trait_value, 'Branch')  ~ 'branch', 
+                             str_detect(Trait_value, 'Shape')  ~ 'shape', 
+                             str_detect(Trait_value, 'Temp')  ~ 'Temp', 
+                             str_detect(Trait_value, 'Energy')  ~ 'energy', 
+                             str_detect(Trait_value, 'Calcif')  ~ 'calcif', 
+                             str_detect(Trait_value, 'Color')  ~ 'color'),
+           Trait = as.factor(Trait)) %>%
+    group_by(Date, Trait_value) %>%
+    mutate(Mean_abund = mean(Abund)) %>%
+    ungroup() %>%
+    select(-rowname, -Abund) %>%
+    unique() %>%
+    group_by(Trait_value) %>%
+    mutate(Scaled_abund = scale(Mean_abund),
+           Scale_temp = scale(Temp_mov),
+           Slope = lm(Scaled_abund ~ Scale_temp)$coefficients[2],
+           Confmin = confint(lm(Scaled_abund ~ Scale_temp))[1,1],
+           Confmax = confint(lm(Scaled_abund ~ Scale_temp))[1,2]) %>%
+    ungroup()
 
-# braym <- env %>%
-#     mutate(across(Temp:Wave_ht_ft_mov, ~ scale(.x)[,1])) %>%
-#     left_join(plot_bray_diff) %>%
-#     mutate(fun = fun * -1) 
-
-#> plot(filter(plot_comm_pcoa, Axis == 'Axis.4')$Date, filter(plot_comm_pcoa, Axis == 'Axis.4')$Value)
-
-ggplot(plot_cwm_pca, aes(x = Date, y = Value, color = PC)) + 
+smooth_pc_plot <- ggplot(plot_cwm_pca, aes(x = Date, y = Value, color = PC)) + 
     geom_smooth()
-ggplot(plot_comm_pcoa, aes(x = Date, y = Value, color = Axis)) +
+smooth_mfa_plot <- ggplot(plot_cwm_mfa, aes(x = Date, y = Value, color = Dim)) + 
     geom_smooth()
+smooth_axis_plot <- ggplot(plot_comm_pcoa, aes(x = Date, y = Value, color = Axis)) +
+    geom_smooth()
+
+traits_temp_plot_smooth <- ggplot(plot_cwm_env, aes(x = Temp_mov, y = Mean_abund, color = Trait_value)) +
+    geom_smooth(show.legend = F) + 
+    #geom_line() +
+    facet_wrap(~ Trait, scales = 'free_y')
+traits_temp_plot_lm <- ggplot(plot_cwm_env, aes(x = Temp_mov, y = Mean_abund, color = Trait_value)) +
+    geom_smooth(method = 'lm', show.legend = F) + 
+    #geom_line() +
+    facet_wrap(~ Trait, scales = 'free_y')
+traits_temp_slopes_plot <- ggplot(plot_cwm_env, aes(x = Slope, xmin = Slope + Confmin, xmax = Slope + Confmax, y = Trait_value, color = Trait)) +
+    geom_point(show.legend = F) +
+    geom_linerange(show.legend = F) +
+    geom_vline(aes(xintercept = 0), linetype = 2) +
+    ggtitle("Effect (slope) of Temperature on individual trait values (Temp ~ CWM)") +
+    ylab('') +
+    theme(axis.text.y = element_text(angle = 30))
+
+traits_time_plot_smooth <- ggplot(plot_cwm_env, aes(x = Date, y = Mean_abund, color = Trait_value)) +
+    geom_smooth(show.legend = F) + 
+    #geom_line() +
+    facet_wrap(~ Trait, scales = 'free_y')
+traits_time_plot_lm <- ggplot(plot_cwm_env, aes(x = Date, y = Mean_abund, color = Trait_value)) +
+    geom_smooth(method = 'lm', show.legend = F) + 
+    #geom_line() +
+    facet_wrap(~ Trait, scales = 'free_y')
+
+
+```
+
+```{r walking plots}
+
+comm_walk <- plot_comm_pcoa %>%
+    select(Date, Axis, Value) %>%
+    filter(Axis %in% c('Axis.1', 'Axis.2', 'Axis.3')) %>%
+    group_by(Date, Axis) %>%
+    mutate(Value = mean(Value)) %>%
+    ungroup() %>%
+    unique() %>%
+    pivot_wider(names_from = Axis, values_from = Value) %>%
+    mutate(lead_Axis.1 = lead(Axis.1, order_by = Date),
+           lead_Axis.2 = lead(Axis.2, order_by = Date),
+           lead_Axis.3 = lead(Axis.3, order_by = Date),
+           Month = month(Date, label = T),
+           Year = factor(year(Date)))
+
+
+comm_walk_plot <- ggplot(comm_walk, aes(x = Axis.1, y = Axis.2, xend = lead_Axis.1, yend = lead_Axis.2, color = Month)) +
+    geom_point(aes(shape = Year)) +
+    geom_segment(aes(alpha = Axis.3-lead_Axis.3)) +
+    scale_color_discrete()
+
+cwm_walk <- plot_cwm_pca %>%
+    select(Date, PC, Value) %>%
+    filter(PC %in% c('PC1', 'PC2', 'PC3')) %>%
+    group_by(Date, PC) %>%
+    mutate(Value = mean(Value)) %>%
+    ungroup() %>%
+    unique() %>%
+    pivot_wider(names_from = PC, values_from = Value) %>%
+    mutate(lead_PC1 = lead(PC1, order_by = Date),
+           lead_PC2 = lead(PC2, order_by = Date),
+           lead_PC3 = lead(PC3, order_by = Date),
+           Month = month(Date, label = T),
+           Year = factor(year(Date)))
+
+cwm_walk_plot <- ggplot(cwm_walk, aes(x = PC1, y = PC2, xend = lead_PC1, yend = lead_PC2, color = Month)) +
+    geom_point(aes(shape = Year)) +
+    geom_segment(aes(alpha = PC3-lead_PC3)) +
+    scale_color_discrete()
+
+# "Annual community shifts across a functional trait gradient" 
+# Same time, different function
+# is that just algae <-> inverts ?
+
+mfa_walk <- plot_cwm_mfa %>%
+    select(Date, Dim, Value) %>%
+    filter(Dim %in% c('Dim.1', 'Dim.2', 'Dim.3')) %>%
+    group_by(Date, Dim) %>%
+    mutate(Value = mean(Value)) %>%
+    ungroup() %>%
+    unique() %>%
+    pivot_wider(names_from = Dim, values_from = Value) %>%
+    mutate(lead_Dim.1 = lead(Dim.1, order_by = Date),
+           lead_Dim.2 = lead(Dim.2, order_by = Date),
+           lead_Dim.3 = lead(Dim.3, order_by = Date),
+           Month = month(Date, label = T),
+           Year = factor(year(Date)))
+
+mfa_walk_plot <- ggplot(mfa_walk, aes(x = Dim.1, y = Dim.2, xend = lead_Dim.1, yend = lead_Dim.2, color = Month)) +
+    geom_point(aes(shape = Year)) +
+    geom_segment(aes(alpha = Dim.3-lead_Dim.3)) +
+    scale_color_discrete()
+
+
+fun_spread_plot <- plot_cwm_pca %>%
+    pivot_wider(names_from = PC, values_from = Value) %>%
+    mutate(Month = month(Date, label = T),
+           Year = year(Date)) %>% 
+    filter(Month %in% c('Jul', 'Aug', 'Sep')) %>%
+ggplot(aes(x = PC1, y = PC2, color = factor(Year))) +
+    geom_point() +
+    stat_ellipse() +
+    ggtitle('Functional Comm')
+
+mfa_spread_plot <- plot_cwm_mfa %>%
+    pivot_wider(names_from = Dim, values_from = Value) %>%
+    mutate(Month = month(Date, label = T),
+           Year = year(Date)) %>% 
+    filter(Month %in% c('Jul', 'Aug', 'Sep')) %>%
+ggplot(aes(x = Dim.1, y = Dim.2, color = factor(Year))) +
+    geom_point() +
+    stat_ellipse() +
+    ggtitle('Functional Comm')
+
+mfa_v_plot <- ggplot() +
+    geom_point(data = cwm_mfa, aes(x = scale(Dim.1), y = scale(Dim.2)), alpha = 0.4) +
+    geom_segment(data = rownames_to_column(as.data.frame(cwm_mfa_whole$group$contrib)), 
+                 aes(x = 0, y = 0, xend = scale(Dim.1), yend = scale(Dim.2), color = rowname),
+                 arrow = arrow(type = 'closed', length = unit(2, 'mm'))) + 
+    geom_label(data = rownames_to_column(as.data.frame(cwm_mfa_whole$group$contrib)), 
+               aes(x = scale(Dim.1), y = scale(Dim.2), label = rowname)) + 
+    ggtitle('Functional Comm')
+
+tax_spread_plot <- plot_comm_pcoa %>%
+    pivot_wider(names_from = Axis, values_from = Value) %>%
+    mutate(Month = month(Date, label = T),
+           Year = year(Date)) %>% 
+    filter(Month %in% c('Jul', 'Aug', 'Sep')) %>%
+ggplot(aes(x = Axis.1, y = Axis.2, color = factor(Year), shape = Month)) +
+    geom_point() +
+    stat_ellipse() +
+    ggtitle('Tax Comm')
 
 
 ```
 
 ```{r run lmer models}
-# compare models before doing it for a bunch
-lmer(scale(comm_pcoa$Axis.1) ~ PAR_mov * Temp_mov + Salinity_ppt_mov + Wave_ht_ft_mov + (1|Site) + (1|Quad) + (1|Date), data = scale_env)
-lmer(scale(cwm_pca$PC1) ~ PAR_mov * Temp_mov + Salinity_ppt_mov + Wave_ht_ft_mov +  (1|Site) + (1|Quad) + (1|Date), data = scale_env)
 
-lmer(scale(comm_pcoa$Axis.1) ~ PAR_mov + Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = scale_env)
-lmer(scale(cwm_pca$PC1) ~ PAR_mov + Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = scale_env)
+model_df <- left_join(rownames_to_column(scale_env), rownames_to_column(meta)) %>%
+    column_to_rownames(var = 'rowname')
+
+lmer(scale(comm_pcoa$Axis.1) ~ Temp_mov + (1|Site) + (1|Date), data = model_df)
+lmer(scale(cwm_pca$PC1) ~ Temp_mov + (1|Site) + (1|Date), data = model_df)
 
 # scaling helped, added Date as rf
 # may need to average communities on each date. 
-mod1c <- lmer(scale(comm_pcoa$Axis.1) ~ PAR_mov + Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = scale_env)
-mod2c <- lmer(scale(comm_pcoa$Axis.2) ~ PAR_mov + Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = scale_env)
-mod3c <- lmer(scale(comm_pcoa$Axis.3) ~ PAR_mov + Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = scale_env)
-mod4c <- lmer(scale(comm_pcoa$Axis.4) ~ PAR_mov + Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = scale_env)
+mod1c <- lmer(scale(comm_pcoa$Axis.1) ~ Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = model_df)
+mod2c <- lmer(scale(comm_pcoa$Axis.2) ~ Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = model_df)
+mod3c <- lmer(scale(comm_pcoa$Axis.3) ~ Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = model_df)
+mod4c <- lmer(scale(comm_pcoa$Axis.4) ~ Temp_mov + (1|Site) + (1|Quad) + (1|Date), data = model_df)
 
-mod1t <- lmer(scale(cwm_pca$PC1) ~ PAR_mov + Temp_mov +  (1|Site) + (1|Quad) + (1|Date), data = scale_env)
-mod2t <- lmer(scale(cwm_pca$PC2) ~ PAR_mov + Temp_mov +  (1|Site) + (1|Quad) + (1|Date), data = scale_env)
-mod3t <- lmer(scale(cwm_pca$PC3) ~ PAR_mov + Temp_mov +  (1|Site) + (1|Quad) + (1|Date), data = scale_env)
-mod4t <- lmer(scale(cwm_pca$PC4) ~ PAR_mov + Temp_mov +  (1|Site) + (1|Quad) + (1|Date), data = scale_env)
+mod1t <- lmer(scale(cwm_pca$PC1) ~ Temp_mov +  (1|Site) + (1|Quad) + (1|Date), data = model_df)
+mod2t <- lmer(scale(cwm_pca$PC2) ~ Temp_mov +  (1|Site) + (1|Quad) + (1|Date), data = model_df)
+mod3t <- lmer(scale(cwm_pca$PC3) ~ Temp_mov +  (1|Site) + (1|Quad) + (1|Date), data = model_df)
+mod4t <- lmer(scale(cwm_pca$PC4) ~ Temp_mov +  (1|Site) + (1|Quad) + (1|Date), data = model_df)
 
 mod1c
 mod2c
@@ -675,7 +959,7 @@ results
 ```
 
 ```{r plot forest plots}
-rplot <- results %>%
+forest_plot <- results %>%
     ggplot(aes(y = PC, x = Estimate, color = Type)) +
     #geom_col(aes(y = Var, x = Total_valid_estimate, fill = Type), color = 'grey25', position = 'dodge') +
     geom_pointrange(aes(xmin = Estimate - Std_error, xmax = Estimate + Std_error), position = position_jitter(width = 0, height = .1, seed = 1), show.legend = F) +
@@ -688,7 +972,7 @@ rplot <- results %>%
           axis.text.y = element_text(size = ax_text_size),
           plot.margin = margin(0,0,8,8),
           strip.text = element_text(size = lab_text_size))
-rplot
+forest_plot
 # 
 # legend_fig <- results %>%
 #     ggplot(aes(y = PC, x = Estimate, fill = Type)) +
@@ -725,12 +1009,5 @@ rplot
 
 ```
 
-```{r fig 2}
 
-fig2 <- rplot
-fig2
-
-#ggarrange(eplot, cplot, rplot, ncol = 1)
-
-```
 

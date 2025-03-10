@@ -1,0 +1,879 @@
+---
+title: "Epibenthic Community Statistics on functional ecology from 5 mile ledge"
+date: "2023"
+author: "Jared Oviatt"
+output:
+  word_document
+  # pdf_document: 
+  #   toc: yes
+  #   keep_tex: yes
+  #   fig_height: 6
+  #   toc: TRUE
+  #   highlight: "tango"
+  #   code_folding: "show"
+  #   theme: "yeti"
+  # html_document:
+editor_options: 
+  chunk_output_type: "console"
+---
+
+
+
+
+## Initialize
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  out.width = "6.5in"
+)
+```
+
+#### Load libraries
+```{r Load libraries, include=FALSE, results='hide'}
+
+#library(funrar)
+library(FactoMineR) # MFA
+library(lme4)
+library(FD)
+library(mFD)
+#library(colordistance)
+library(ggpubr)
+library(ggthemes) # pretty plotting
+library(vegan) # community stats
+# library(flextable) # alternate to kable
+library(tidyverse)
+
+```
+
+```{r source outside r scripts}
+
+source('./R/Functions.R')
+source('./R/ggsetup.R')
+
+```
+
+#### Save Plots
+```{r save plots, eval=FALSE, include=FALSE}
+# Code for exporting finalized figures using parameters set in ggsetup.R
+# Ecography:
+# Width: 945 (single column), 1476 (1.5 column) or 1961 (double column) pixels (at 300 dpi).
+
+my_ggsave("comm_over_time.png", spp_over_time_plot, 
+          height = 900, width = 1476)
+my_ggsave("diversity_and_abundance.png", diversity_and_abundance_plot, 
+          height = 1200, width = 1476) 
+my_ggsave("trait_spaces.png", three_trait_space_plot, height = 2400, 
+          width = 1961) 
+
+# # for finalizing ordination plots # re export from adobe
+# my_ggsave("ordinations_mfa.pdf", cwm_plot, height = 945, width = 945, device = 'pdf') # 
+# my_ggsave("ordinations_pcoa.pdf", comm_plot, height = 945, width = 945, device = 'pdf') # 
+
+```
+
+### Load data
+```{r Load Data and format, include=FALSE, results='hide'}
+
+# define location of data
+cover_file <- "./Data/Percent_cover.csv"
+traits_file <- "./Data/Data_cleaned/x 2024-07-23 traits_5_mile_clean.csv"
+meta_file <- "./Data/lacroce_metadata.csv"
+
+# load in data to dataframes
+master_cover <- read.csv(cover_file) %>%
+    filter(!is.na(Points))
+metadata <- read_csv(meta_file)
+traits <- read_csv(traits_file)
+
+```
+
+### Make comm, tax, env, struc matrices
+```{r Make matrices, echo=FALSE, results='hide'}
+# Make community, environment, struc matrices and distance matrices 
+
+# set data transformation. 
+TRANSFORM <- 'arcsine' # 'none', 'logit', or 'arcsine'
+
+# define subset of months
+MONTHS <- c('Jun', 'Jul', 'Aug')
+
+# create community matrix and make sure it 
+comm <- master_cover %>%
+    filter(!is.na(`Image.name`)) %>%
+    column_to_rownames(var = 'Image.name') %>%
+    select(-Points)/100 # return to percentages 0-1
+colnames(comm) <- colnames(comm) %>% 
+    str_replace_all("[.]", replacement = " ") %>%
+    trimws() 
+
+# remove unidentified species and abiotic cover which cannot be assigned traits
+comm <- comm[,(colnames(comm) %in% traits$Name)]
+
+c <- comm # save untransformed community matrix
+
+if(TRANSFORM == 'arcsine') {
+        comm <- asin(sqrt(c))  # asin transformed
+    } else if(TRANSFORM == 'logit') {
+        comm <- car::logit(c, percents = F)
+    }
+
+meta <- metadata %>%
+    column_to_rownames(var = 'Name') %>%
+    select(Date, `Season of Scrapes`, Site, Quad) %>%
+    rename(Scrape = `Season of Scrapes`) %>%
+    mutate(across(Scrape:Site, factor))
+
+#comm <- comm[rownames(meta),]
+
+# report community analyzed and species removed with mean abundance
+report_comm <- names(comm) %>% 
+    as.data.frame() 
+names(report_comm) <- c("Species_used")
+# report_comm$Species_original <- names()
+# write.csv(report_comm, file = "./Data/community_used.csv")
+
+algae_traits <- filter(traits, Energy == 'chl')
+inverts_traits <- filter(traits, Energy != 'chl' & !is.na(Energy))
+
+
+```
+
+### Make trait space, trait comms
+```{r make trait space, echo=FALSE}
+
+## With color and og
+# trait_space_init <- traits %>%
+#     mutate(Color_L = L,
+#            Color_a = a,
+#            Color_b = b,) %>%
+#     filter(Complete_but_colorless & !is.na(Color_LAB))  %>%
+#     select(-Short_Code, -Abund, -Percent_complete, -Complete_but_colorless, -Color_LAB, -L, -a, -b)
+
+# # With color no og
+# trait_space_init <- traits %>%
+#     mutate(Color_L = L,
+#            Color_a = a,
+#            Color_b = b,) %>%
+#     filter(Complete_but_colorless & !is.na(Color_LAB))  %>%
+#     select(-Short_Code, -Abund, -Percent_complete, -Complete_but_colorless, -Color_LAB, -L, -a, -b, -Original_individual)
+
+# # no og, no color
+# trait_space_init <- traits %>%
+#     select(-Short_Code, -Abund, -Percent_complete, -Complete_but_colorless, -Color_LAB, -L, -a, -b, -Original_individual)
+
+# no branched, no color
+trait_space_init <- traits %>%
+    filter(!is.na(Original_individual)) %>%
+    select(-Short_Code, -Abund, -Percent_complete, -Complete_but_colorless, -Color_LAB, -L, -a, -b, -Branched)
+
+# format as factors, ordinal factors
+trait_space <- trait_space_init %>%
+    mutate(across(Observed_thermal_range:Energy, as.factor),
+           Height = factor(Height, levels = c('0-10', '10-100', '100-500', '500-1000'), ordered = T),
+           #Branched = factor(Branched, levels = c('no', 'mid', 'frequent'), ordered = T),
+           Shape = factor(Shape, levels = c('encrusting', 'globulose', 'elongate', 'filamentous'), ordered = T),
+           Calcified = factor(Calcified, levels = c('no', 'soft', 'flex', 'rigid'), ordered = T)) %>%
+           separate(Observed_thermal_range, c('Temp_tmin', 'Temp_tmax'), sep = '-') %>%
+    mutate(Temp_tmin = as.numeric(Temp_tmin),
+           Temp_tmax = as.numeric(Temp_tmax)) %>%
+    column_to_rownames('Name') 
+
+#write.csv(trait_space, "./Tables/trait_space_report.csv")
+
+# gower dissimilarity
+# trait_dist <- trait_space %>%
+#     gowdis()
+# same but scaled
+trait_dist <- trait_space %>%
+    mutate(across(everything(as.numeric()))) %>%
+    gowdis()
+
+# PCoA traits
+trait_pcoa <- pcoa(trait_dist)
+trait_plot <- trait_pcoa$vectors %>% 
+    as.data.frame() %>%
+    rownames_to_column() 
+
+
+# # gower dissimilarity - algae
+# trait_dist_algae <- trait_space %>%
+#     rownames_to_column %>%
+#     filter(rowname %in% algae_traits$Name) %>%
+#     column_to_rownames(var = 'rowname') %>%
+#     gowdis()
+# 
+# # PCoA traits - algae
+# trait_pcoa_algae <- pcoa(trait_dist_algae)
+# trait_plot_algae <- trait_pcoa_algae$vectors %>% 
+#     as.data.frame() %>%
+#     rownames_to_column() 
+# 
+# # gower dissimilarity - inverts
+# trait_dist_inverts <- trait_space %>%
+#     rownames_to_column %>%
+#     filter(rowname %in% inverts_traits$Name) %>%
+#     column_to_rownames(var = 'rowname') %>%
+#     gowdis()
+# 
+# # PCoA traits - inverts
+# trait_pcoa_inverts <- pcoa(trait_dist_inverts)
+# trait_plot_inverts <- trait_pcoa_inverts$vectors %>% 
+#     as.data.frame() %>%
+#     rownames_to_column() 
+
+
+```
+
+```{r fcomm weighted trait avgs, echo=FALSE}
+
+fcomm <- select(comm, rownames(trait_space)) 
+fcomm$sum <- rowSums(fcomm)
+
+summer <- meta %>% 
+    mutate(Year = as.factor(year(Date)),
+           Month = as.factor(month(Date, label = T, abbr = T))) %>%
+    filter(Month %in% MONTHS) %>%
+    filter(Scrape == 'C') %>%
+    select(Date, Year, Month)
+
+fcomm <- fcomm[rownames(summer),]
+fcomm <- filter(fcomm, sum > 0) %>%
+     select(-sum)
+fcomm <- fcomm[,colSums(fcomm) != 0]
+
+fmeta <- meta[rownames(fcomm),] %>%
+    mutate(Year = factor(year(Date)))
+
+falgae <- select(fcomm, any_of(algae_traits$Name))
+finverts <- select(fcomm, any_of(inverts_traits$Name))
+
+trait_space <- trait_space[colnames(fcomm),]
+
+cwm <- functcomp(trait_space, as.matrix(fcomm), CWM.type = 'all') 
+cwm_scaled <- mutate(cwm, across(everything(), ~ scale(.x, center = F)[,1]))
+cwm_algae <- jfunctcomp(trait_space[colnames(falgae),], as.matrix(falgae), CWM.type = 'all') 
+cwm_inverts <- jfunctcomp(trait_space[colnames(finverts),], as.matrix(finverts), CWM.type = 'all') 
+
+# was euclid. lets see if this fucks up. 
+comm_pcoa_whole <- vegdist(fcomm, method = 'bray') %>%
+    pcoa()
+comm_pcoa <- comm_pcoa_whole$vectors %>%
+    as.data.frame()
+
+top_spp <- fcomm %>% 
+    mutate(across(everything(), ~ sin(.x)^2)) %>%
+    colSums() %>%
+    as.data.frame() %>%
+    mutate(Abund = `.` / nrow(fcomm)) %>%
+    arrange(desc(Abund)) %>%
+    slice(1:10) %>%
+    select(Abund) %>%
+    rownames_to_column(var = 'Name')
+
+```
+
+```{r mfa generation and make plots, echo=FALSE}
+
+# mfa_group_nums <- c(2, 4, 7, 4, 4, 6, 3)
+# mfa_names <- c('temp', 'height', 'shape_x_branched', 'calcified', 'energy', 'OG', 'color')
+# cwm_mfa_whole <- MFA(cwm, 
+#                group = mfa_group_nums,
+#                name.group = mfa_names)
+
+mfa_group_nums <- c(2, 4, 4, 4, 4, 4)
+mfa_names <- c('temp', 'height', 'shape', 'calcified', 'energy', 'original_ind')
+mfa_weights <- c(1, 1, 1, 1, 1, 1)
+cwm_mfa_whole <- MFA(cwm,
+               group = mfa_group_nums,
+               name.group = mfa_names,
+               weight.col.mfa = rep(mfa_weights, mfa_group_nums))
+
+# mfa_group_nums <- c(2, 4, 7, 4, 4)
+# mfa_names <- c('temp', 'height', 'shape_x_branched', 'calcified', 'energy')
+# cwm_mfa_whole <- MFA(cwm,
+#                group = mfa_group_nums,
+#                name.group = mfa_names)
+
+cwm_mfa <- cwm_mfa_whole$ind$coord %>%
+    as.data.frame()
+
+cwm_mfa_whole$group$RV
+
+```
+
+```{r prep comm plots}
+
+wts <- 1/rep(mfa_group_nums, mfa_group_nums)
+
+cwm_row_means <- cwm %>%
+    rowwise() %>%
+    mutate(Total_abund = weighted.mean(c_across(everything()), wts)) %>%
+    ungroup() %>%
+    mutate(Total_abund = Total_abund - min(Total_abund)) %>%
+    select(Total_abund) %>%
+    rownames_to_column()
+
+cwm_mfa_plotting <- cwm_mfa %>%
+    rownames_to_column() %>%
+    select(rowname, Dim.1, Dim.2) %>%
+    left_join(rownames_to_column(fmeta)) %>%
+    mutate(Total_abund = cwm_row_means$Total_abund,
+           Dim.1 = -Dim.1,
+           Dim.2 = -Dim.2)
+
+mfa_contrib <- cwm_mfa_whole$quanti.var$coord %>%
+    as.data.frame() %>%
+    mutate(across(everything(), ~scale(.x)[,1])) %>%
+    rownames_to_column(var = 'Trait') %>%
+    separate_wider_delim(Trait, '_', 
+                         names = c('Trait', 'Trait_value'), 
+                         too_many = 'merge') %>%
+    select(Trait, Trait_value, Dim.1, Dim.2) %>%
+    mutate(Vector_length = sqrt(Dim.1^2 + Dim.2^2),
+           Dim.1 = -Dim.1,
+           Dim.2 = -Dim.2) %>%
+    filter(Vector_length > quantile(Vector_length)[3])
+
+
+comm_pcoa_plotting <- comm_pcoa %>%
+    rownames_to_column() %>%
+    mutate(Total_abund = rowSums(fcomm)) %>%
+    left_join(rownames_to_column(fmeta))
+
+pcoa_contrib <- wascores(comm_pcoa, fcomm) %>%
+    as.data.frame() %>%
+    select(Axis.1, Axis.2) %>%
+    rownames_to_column(var = 'Species') %>%
+    filter(Species %in% top_spp$Name)
+
+```
+
+```{r old plot spp trait space, echo=FALSE}
+
+# # spp first
+# trait_space_plot <- trait_plot %>%
+#     filter(rowname %in% colnames(fcomm)) %>%
+#     ggplot(aes(x = Axis.1, y = Axis.2, color = rowname %in% colnames(falgae))) +
+#     geom_point(aes(size = colSums(fcomm)), show.legend = F) +
+#     ggrepel::geom_text_repel(data = filter(trait_plot, rowname %in% top_spp$Name), 
+#               aes(label = rowname),
+#               color = 'black',
+#               show.legend = F,
+#               min.segment.length = 0,
+#               seed = s) +
+#     xlab('All') +
+#     theme(axis.text = element_blank(),
+#           axis.title.y = element_blank())
+# 
+# trait_space_plot_algae <- trait_plot_algae %>%
+#     filter(rowname %in% colnames(fcomm)) %>%
+#     ggplot(aes(x = Axis.1, y = Axis.2)) +
+#     geom_point(aes(size = colSums(falgae)), color = "#02bfc4", show.legend = F) +
+#     ggrepel::geom_text_repel(data = filter(trait_plot_algae, rowname %in% top_spp$Name), 
+#               aes(label = rowname),
+#               color = 'black',
+#               show.legend = F,
+#               min.segment.length = 0,
+#               seed = s) +
+#     xlab('Macroalgae') +
+#     theme(axis.text = element_blank(),
+#           axis.title.y = element_blank())
+# 
+# trait_space_plot_inverts <- trait_plot_inverts %>%
+#     filter(rowname %in% colnames(fcomm)) %>%
+#     ggplot(aes(x = Axis.1, y = Axis.2, color = rowname %in% colnames(falgae))) +
+#     geom_point(aes(size = colSums(finverts)), show.legend = F) +
+#     ggrepel::geom_text_repel(data = filter(trait_plot_inverts, rowname %in% top_spp$Name), 
+#               aes(label = rowname),
+#               color = 'black',
+#               show.legend = F,
+#               min.segment.length = 0,
+#               seed = s) +
+#     xlab('Invertebrates') +
+#     theme(axis.text = element_blank(),
+#           axis.title.y = element_blank())
+# 
+# individual_trait_space_plot <- ggarrange(trait_space_plot_algae, trait_space_plot_inverts, ncol = 2)
+# all_trait_spaces_plot <- ggarrange(trait_space_plot, individual_trait_space_plot, ncol = 1) %>%
+#     annotate_figure(left = 'PCoA Axis 2', bottom = 'PCoA Axis 1')
+
+```
+
+```{r trait space plots 2d density 16v17}
+
+
+s = 5
+
+pc1_var <- trait_pcoa$values$Relative_eig[1] * 100
+pc2_var <- trait_pcoa$values$Relative_eig[2] * 100
+
+# trait_plot <- trait_pcoa$vectors %>% 
+#     as.data.frame() %>%
+#     rownames_to_column() 
+
+trait_plot <- trait_plot %>%
+    filter(rowname %in% colnames(fcomm)) %>%
+    select(rowname, Axis.1, Axis.2) 
+
+trait_plot$Abund_16 <- colMeans(fcomm[rownames(filter(summer, Year == 2016)),], na.rm = T)
+trait_plot$Abund_17 <- colMeans(fcomm[rownames(filter(summer, Year == 2017)),], na.rm = T)
+
+wts_16 <- uncount(trait_plot, weights = as.integer(Abund_16*100)) 
+wts_17 <- uncount(trait_plot, weights = as.integer(Abund_17*100)) 
+
+H <- c(.5,.5)
+COLOR_INTENSITY <- 1
+BINS <- 16
+
+trait_space_plot_16 <- trait_plot %>%
+    ggplot(aes(x = Axis.1, y = Axis.2, color = rowname %in% colnames(falgae))) +
+    stat_density_2d_filled(data = wts_16, h = H, bins = BINS,
+                           aes(color = NA), linetype = 'blank', 
+                           alpha = 1, show.legend = F) +
+    geom_point(aes(size = Abund_16), show.legend = F) +
+    ggrepel::geom_label_repel(data = filter(trait_plot, rowname %in% top_spp$Name), 
+              aes(label = rowname),
+              color = 'black',
+              show.legend = F,
+              min.segment.length = 0,
+              size = ax_text_size/.pt,
+              seed = s) +
+    scale_fill_grey(start = 1, end = 1 - COLOR_INTENSITY * max(trait_plot$Abund_16)^(1/2)) +
+    scale_color_manual(values = c('orange', 'maroon')) +
+    theme(axis.text = element_blank(),
+          axis.title = element_blank())
+
+trait_space_plot_17 <- trait_plot %>%
+    ggplot(aes(x = Axis.1, y = Axis.2, color = rowname %in% colnames(falgae))) +
+    stat_density_2d_filled(data = wts_17, h = H, bins = BINS,
+                           aes(color = NA), linetype = 'blank', 
+                           alpha = 1, show.legend = F) +
+    geom_point(aes(size = Abund_17), show.legend = F) +
+    ggrepel::geom_label_repel(data = filter(trait_plot, rowname %in% top_spp$Name), 
+              aes(label = rowname),
+              color = 'black',
+              show.legend = F,
+              min.segment.length = 0,
+              size = ax_text_size/.pt,
+              seed = s) +
+    scale_fill_grey(start = 1, end = 1 - COLOR_INTENSITY * max(trait_plot$Abund_17)^(1/2)) +
+    scale_color_manual(values = c('orange', 'maroon')) +
+    theme(axis.text = element_blank(),
+          axis.title = element_blank())
+
+ef <- cmdscale(trait_dist, eig = T) %>% # have to generate the pcoa again here using vegan's preferred function
+    envfit(trait_space)
+
+ef_vectors <- bind_cols(as.data.frame(ef$vectors$arrows),
+                        as.data.frame(ef$vectors$r),
+                        as.data.frame(ef$vectors$pval)) %>%
+    rename(R = `ef$vectors$r`,
+           P = `ef$vectors$pval`) %>%
+    mutate(Dim1_scaled = Dim1 * R * (1-P),
+           Dim2_scaled = Dim2 * R * (1-P)) %>%
+    rownames_to_column() %>%
+    mutate(Trait_value = if_else(rowname == 'Temp_tmin', 'thermal minimum', 'thermal maximum'))
+    
+
+# words <- names(ef$factors$r)
+# regex <- paste0("^(", paste(words, collapse = "|"), ")(.*)$")
+trait_list <- colnames(trait_space)
+trait_value_key <-
+    c(
+        "0-10" = "0-10mm",
+        "10-100" = "10-100mm",
+        "100-500" = "100-500mm",
+        "500-1000" = "500-1000mm",
+        "encrusting" = "encrusting",
+        "globulose" = "globulose",
+        "elongate" = "elongate",
+        "filamentous" = "filamentous",
+        "no" = "uncalcified",
+        "soft" = "soft calcified",
+        "flex" = "flexible calcified",
+        "rigid" = "rigid calcified",
+        "actv" = "active consumer",
+        "chl" = "photosynthetic",
+        "pass" = "passive consumer",
+        "symb_act" = "active consumer w/ symbionts",
+        "carpo_generated / spore_nm_1N" = "non-motile 1N spore",
+        "flagellated_1n" = "motile 1N spore",
+        "planula" = "planula larvae",
+        "simple_flagellated" = "flagellated larvae"
+    )
+
+
+ef_centroids <- as.data.frame(ef$factors$centroids) %>%
+    rownames_to_column(var = 'Trait_value') %>%
+    mutate(Trait = str_extract(Trait_value, paste(trait_list, collapse = '|')))
+
+ef_factors <- bind_cols(as.data.frame(ef$factors$r),
+                        as.data.frame(ef$factors$pval)) %>%
+    rename(R = `ef$factors$r`,
+           P = `ef$factors$pval`) %>%
+    rownames_to_column(var = 'Trait') %>%
+    mutate(Trait = str_extract(Trait, paste(trait_list, collapse = '|'))) %>%
+    left_join(ef_centroids) %>%
+    mutate(Dim1_scaled = Dim1 * R * (1-P) * 5,
+           Dim2_scaled = Dim2 * R * (1-P) * 5,
+           Trait_value = str_remove(Trait_value, paste(trait_list, collapse = '|')),
+           Trait_value_pretty = trait_value_key[Trait_value])
+
+trait_space_plot_vectors <- trait_plot %>%
+    ggplot(aes(x = Axis.1, y = Axis.2, color = rowname %in% colnames(falgae))) +
+    geom_point(size = 2, show.legend = F) +
+    geom_segment(data = ef_vectors, 
+                 aes(x = 0, y = 0, xend = Dim1_scaled, yend = Dim2_scaled, color = NA), 
+                 arrow = arrow(length = unit(2, 'mm'), type = 'closed'), show.legend = F) +
+    geom_segment(data = ef_factors, 
+                 aes(x = 0, y = 0, xend = Dim1_scaled, yend = Dim2_scaled, color = NA), 
+                 arrow = arrow(length = unit(2, 'mm'), type = 'closed'), show.legend = F) +
+    ggrepel::geom_label_repel(data = filter(ef_vectors, 
+                                            sqrt(Dim1_scaled^2 + Dim2_scaled^2) > .3),
+                              aes(label = Trait_value, x = Dim1_scaled, y = Dim2_scaled),
+                              color = 'black',
+                              show.legend = F,
+                              min.segment.length = 0,
+                              size = ax_text_size/.pt,
+                              seed = s) +
+    ggrepel::geom_label_repel(data = filter(ef_factors, 
+                                            sqrt(Dim1_scaled^2 + Dim2_scaled^2) > .3),
+                              aes(label = Trait_value_pretty, x = Dim1_scaled, y = Dim2_scaled),
+                              color = 'black',
+                              show.legend = F,
+                              min.segment.length = 0,
+                              size = ax_text_size/.pt,
+                              seed = s) +
+    scale_color_manual(values = c('orange', 'maroon')) +
+    theme(axis.text = element_blank(),
+          axis.title = element_blank())
+
+# scales arent working. Need cca to have roughly the same grey background in both plots. 
+three_trait_space_plot <- ggarrange(trait_space_plot_16, 
+                                  trait_space_plot_17, 
+                                  trait_space_plot_vectors,
+                                  ncol = 1, 
+                                  labels = c('2016', '2017'), 
+                                  label.x = .8, 
+                                  label.y = 1) %>%
+    annotate_figure(left = paste('PCoA Axis 2: ', round(pc2_var, 2), '%'), 
+                    bottom = paste('PCoA Axis 1', round(pc1_var, 2), '%'))
+
+```
+
+```{r comm plots}
+
+blank_plot <- ggplot(NULL) +
+    theme_void()
+
+mfa_contrib$Trait_value_pretty <- c('0-10mm', '10-100mm', 'Encrusting', 'Elongated', 'Uncalcified', 'Rigid', 'Active consumer', 'Photosynthetic', '1N unflagellated spore', '1N flagellated spore', 'Planula larvae')
+mfa_cwm_plot <- ggplot() +
+    geom_point(data = cwm_mfa_plotting, 
+               aes(x = Dim.1, y = Dim.2, color = Year), show.legend = F) +
+    stat_ellipse(data = cwm_mfa_plotting, 
+                 aes(x = Dim.1, y = Dim.2, color = Year), 
+                 level = 0.90,
+                 linetype = 2,
+                 show.legend = F) +
+    geom_segment(data = mfa_contrib, 
+                 aes(x = 0, y = 0, xend = Dim.1 * 2, yend = Dim.2 * 2), 
+                  arrow = arrow(length = unit(2, 'mm'), type = 'closed'), show.legend = F) +
+    ggrepel::geom_label_repel(data = mfa_contrib,
+               aes(x = Dim.1 * 2 + 0.5, y = Dim.2 * 2 + 0.5, label = Trait_value_pretty, fill = Trait),
+               show.legend = T, size = small_text_size/.pt,
+               seed = 3, min.segment.length = 10) +
+    coord_cartesian(xlim = c(-4, 3.5), ylim = c(-4, 4)) +
+    scale_fill_few()
+
+
+cwm_1_density <- ggplot(cwm_mfa_plotting, aes(x = Dim.1, fill = Year)) +
+    geom_density(aes(weight = Total_abund), 
+                 alpha = 0.5, show.legend = F, color = 'black') +
+    coord_cartesian(xlim = c(-4, 3.5)) +
+    theme_void() 
+cwm_2_density <- ggplot(cwm_mfa_plotting, aes(y = Dim.2, fill = Year)) +
+    geom_density(aes(weight = Total_abund), 
+                 alpha = 0.5, show.legend = F, color = 'black') +
+    coord_cartesian(ylim = c(-4, 4)) +
+    theme_void()
+
+cwm_plot <- ggarrange(cwm_1_density, NA, mfa_cwm_plot, cwm_2_density,
+          heights = c(1,4),
+          widths = c(4,1),
+          align = 'hv',
+          common.legend = T)
+
+
+pcoa_comm_plot <- ggplot() +
+    geom_point(data = comm_pcoa_plotting, 
+               aes(x = Axis.1, y = Axis.2, color = Year), show.legend = F) +
+    stat_ellipse(data = comm_pcoa_plotting, 
+                 aes(x = Axis.1, y = Axis.2, color = Year), 
+                 level = 0.90,
+                 linetype = 2,
+                 show.legend = F) +
+    geom_segment(data = pcoa_contrib, 
+                 aes(x = 0, y = 0, xend = Axis.1 * 2, yend = Axis.2 * 2), 
+                  arrow = arrow(length = unit(2, 'mm'), type = 'closed'), show.legend = F) +
+    ggrepel::geom_label_repel(data = pcoa_contrib,
+               aes(x = Axis.1 * 2, y = Axis.2 * 2, label = Species, fill = Species %in% colnames(falgae)),
+               show.legend = T, size = small_text_size/.pt,
+               seed = 3, min.segment.length = 10) +
+    coord_cartesian(xlim = c(-.6, .4), ylim = c(-.6, .4)) +
+    scale_fill_manual(name = NULL, 
+                      labels = c('Invertebrates', 'Algae'), 
+                      values = c('orange', 'maroon3'))
+
+
+comm_1_density <- ggplot(comm_pcoa_plotting, aes(x = Axis.1, fill = Year)) +
+    geom_density(aes(weight = Total_abund), 
+                 alpha = 0.5, show.legend = F, color = 'black') +
+    coord_cartesian(xlim = c(-.6, .4)) +
+    theme_void() 
+comm_2_density <- ggplot(comm_pcoa_plotting, aes(y = Axis.2, fill = Year)) +
+    geom_density(aes(weight = Total_abund), 
+                 alpha = 0.5, show.legend = F, color = 'black') +
+    coord_cartesian(ylim = c(-.6, .4)) +
+    theme_void() 
+
+comm_plot <- ggarrange(comm_1_density, blank_plot, pcoa_comm_plot, comm_2_density,
+          heights = c(1,4),
+          widths = c(4,1),
+          align = 'hv',
+          common.legend = T)
+
+all_comms_plot <- ggarrange(comm_plot, cwm_plot,
+                            align = 'h',
+                            ncol = 1,
+                            common.legend = F)
+
+```
+
+### Plot species over time and diversity
+```{r species over time}
+
+spp_plot <- comm %>%
+    rownames_to_column() %>%
+    select(all_of(top_spp$Name), rowname) %>%
+    left_join(select(rownames_to_column(meta), rowname, Date)) %>%
+    group_by(Date) %>%
+    mutate(across(`Sargassum filipendula`:`Gracilaria Rhodymenia`, ~ mean(.x))) %>%
+    ungroup() %>%
+    select(-rowname) %>%
+    unique() %>%
+    pivot_longer(cols = `Sargassum filipendula`:`Gracilaria Rhodymenia`, names_to = 'Name', values_to = 'Abund') %>%
+    mutate(Plot_name = case_match(Name,
+                                  "Sargassum filipendula" ~ "S. filipendula",
+                                  "Dictyopteris hoytii" ~ "D. hoytii",
+                                  "Dictyota" ~ "Dictyota",
+                                  "Telesto fruticulosa" ~ "Invertebrate",
+                                  "Encrusting sponge" ~ "Invertebrate",
+                                  "Oculina arbuscula" ~ "Invertebrate", 
+                                  "CCA" ~ "CCA",
+                                  "Peyssonnelia" ~  "Other algae",
+                                  "Amphiroa beauvoisii" ~ "Other algae",
+                                  "Gracilaria Rhodymenia" ~ "Other algae"),
+           Plot_name = factor(Plot_name, 
+                              levels = c("S. filipendula", 
+                              "D. hoytii",
+                              "Dictyota", 
+                              "CCA",
+                              "Invertebrate",
+                              "Other algae")))
+
+spp_over_time_plot <- ggplot(spp_plot, 
+                             aes(x = Date, y = Abund, color = Plot_name, group = Name)) +
+    geom_rect(aes(xmin = mdy('06/01/2016'), xmax = mdy('09/01/2016'),
+                  ymin = -.1, ymax = 0.6),
+              color = NA, fill = 'white') +
+    geom_rect(aes(xmin = mdy('06/01/2017'), xmax = mdy('09/01/2017'),
+                  ymin = -.1, ymax = 0.6),
+              color = NA, fill = 'white') +
+    geom_label(aes(label = 'Summer 2016', x = mdy('08/05/2016'), y = .45),
+               size = lab_text_size/.pt, color = 'black') +
+    geom_label(aes(label = 'Summer 2017', x = mdy('06/26/2017'), y = .45),
+               size = lab_text_size/.pt, color = 'black') +
+    coord_cartesian(ylim = c(0, 0.5)) +
+    geom_line() +
+    ylab('Percent Cover') + 
+    scale_y_continuous(labels = scales::percent) +
+    theme(panel.background = element_rect(fill = 'grey90'),
+          legend.position = 'top',
+          legend.box.margin = margin(l = -25),
+          legend.byrow = T,
+          legend.title = element_blank(),
+          legend.key = element_rect(fill = NA),
+          legend.key.height = unit(4, 'pt')) +
+    guides(color = guide_legend(nrow = 2,))
+
+
+```
+
+```{r diversity plotting, echo=FALSE}
+
+# Functional Diversity
+fun_div <- dbFD(trait_space, fcomm, corr = 'cailliez', CWM.type = 'all') %>%
+    as.data.frame() %>%
+    rownames_to_column(var = 'rowname')
+
+# Taxonomic Diveristy (shannon)
+tax_div <- diversity(fcomm, index = 'simpson') %>%
+    as.data.frame() %>%
+    rename('Shannon' = '.') %>%
+    rownames_to_column(var = 'rowname')
+
+# hist(tax_div$Shannon)
+# hist(fun_div$RaoQ, breaks = 20)
+
+alg_tot <- falgae %>%
+    mutate(Total_alg = sin(rowSums(falgae))^2) %>%
+    select(Total_alg) %>%
+    rownames_to_column()
+
+inv_tot <- finverts %>%
+    mutate(Total_inv = sin(rowSums(finverts))^2) %>%
+    select(Total_inv) %>%
+    rownames_to_column()
+
+
+rich <- fcomm %>%
+    rownames_to_column() %>%
+    left_join(rownames_to_column(fmeta)) %>%
+    mutate(Month = month(Date, label = T),
+           Year = year(Date),
+           across(`Oculina arbuscula`:`Zonaria tournefortii`, is.zero)) %>%
+    filter(Month %in% MONTHS)
+rich$Rich <- rowSums(select(rich, `Oculina arbuscula`:`Zonaria tournefortii`))
+
+rich_plot <- ggplot(rich, aes(x = factor(Year), y = Rich, fill = factor(Year))) +
+    geom_boxplot(color = 'black') +
+    facet_wrap(~ Month)
+
+# combo
+comb_div <- left_join(fun_div, tax_div) %>%
+    left_join(rich) %>%
+    left_join(alg_tot) %>%
+    left_join(inv_tot) %>%
+    select(rowname, Date, Site, Scrape, Quad, RaoQ, Shannon, Total_alg, Total_inv) %>%
+    mutate(Year = factor(year(Date)),
+           Month = factor(month(Date, label = T, abbr = T))) %>%
+    filter(Month %in% MONTHS) 
+
+diversity_plotting <- comb_div %>%
+    pivot_longer(cols = c('RaoQ', 'Shannon',  'Total_alg', 'Total_inv'), names_to = 'Index', values_to = 'Value') %>%
+    filter(Value > 0)
+
+div_labs = as_labeller(c(`RaoQ` = "Rao Entropy", 
+                         `Shannon` = "Shannon-Weiner Diversity", 
+                         `Total_alg` = "Algal cover", 
+                         `Total_inv` = "Invertebrate cover"))
+
+diversity_plot_a <- ggplot(filter(diversity_plotting, Index %in% c('RaoQ', 'Shannon')),
+                                 aes(x = Year, y = Value, fill = Year)) +
+    geom_boxplot(show.legend = F, color = 'black', outliers = F) +
+    xlab('') +
+    ylab('') +
+    facet_wrap(~ Index, scales = 'free_y', labeller = div_labs) 
+
+diversity_plot_b <- ggplot(filter(diversity_plotting, Index %in% c('Total_alg', 'Total_inv')),
+                           aes(x = Year, y = Value, fill = Year)) +
+    geom_boxplot(show.legend = F, color = 'black', outliers = F) +
+    scale_y_continuous(labels = scales::percent) +
+    xlab('') +
+    ylab('') +
+    facet_wrap(~ Index, labeller = div_labs) 
+
+diversity_and_abundance_plot <- ggarrange(diversity_plot_a, 
+                                          diversity_plot_a,
+                                          ncol = 1,labels = c('A', 'B'))
+```
+
+```{r diversity modeling}
+div_model_data <- comb_div %>%
+    mutate(RaoQB = beta_squeeze(RaoQ),
+           Shannonp1 = Shannon + 0.0001,
+           date = Date) %>%
+    separate(date, into = c('Y', 'M', 'D'), sep = '-') %>%
+    mutate(M = as.numeric(M)/1.2,
+           D = as.numeric(D)/30,
+           MMDD = M+D)
+
+# some extra shit I'm trying
+#library(glmmTMB)
+rao_model <- glmmTMB(RaoQB ~ Year + MMDD, family = beta_family(link = 'logit'), data = div_model_data)
+summary(rao_model)
+
+shan_model <- glmmTMB(Shannonp1 ~ Year + MMDD, family = Gamma(link = 'log'), data = div_model_data)
+summary(shan_model)
+
+visreg::visreg(rao_model, 'Year', scale = 'response')
+visreg::visreg(shan_model, 'Year', scale = 'response')
+
+
+
+```
+
+# Extra
+```{r compare traits}
+trait_comparison_plotting <- cwm %>%
+    rownames_to_column() %>%
+    right_join(rownames_to_column(summer)) %>%
+    mutate(across(Temp_tmin:Original_individual_tadpole, ~scale(.x)[,1])) %>%
+    group_by(Year) %>%
+    mutate(across(Temp_tmin:Original_individual_tadpole, ~mean(.x), .names = "{.col}_mean")) %>%
+    ungroup() %>%
+    select(ends_with('_mean'), Year) %>%
+    unique() %>%
+    pivot_longer(Temp_tmin_mean:Original_individual_tadpole_mean, names_to = 'Trait_value', values_to = 'Value') %>%
+    mutate(Trait_value = str_remove(Trait_value, '_mean'),
+           Trait = str_split_i(Trait_value, '_', 1),
+           Trait_value = str_split_i(Trait_value, '_', -1))
+
+trait_comparison_plot <- ggplot(trait_comparison_plotting, aes(x = as.numeric(Year), y = Value, shape = Trait, color = Trait_value)) +
+    geom_point() +
+    geom_line() +
+    #geom_label(data = filter(trait_comparison_plotting, Year == 2016), aes(label = Trait_value), position = position_jitter(height = 0, width = .05)) +
+    ggrepel::geom_label_repel(data = filter(trait_comparison_plotting, Year == 2016), aes(label = Trait_value))
+
+```
+
+```{r fun distinctiveness}
+
+presence_matrix <- matrix(colMeans(fcomm), nrow = 1, ncol = length(colnames(fcomm)), dimnames = list(c('site1'), colnames(fcomm))) # using mean abundance
+#presence_matrix <- matrix(rep(1), nrow = 1, ncol = length(colnames(fcomm)), dimnames = list(c('site1'), colnames(fcomm))) # using presence
+
+trait_dist_matrix <- as.matrix(trait_dist)
+names(trait_dist_matrix) <- names(fcomm)
+
+trait_distinct <- distinctiveness(presence_matrix, trait_dist_matrix) %>%
+    t() %>%
+    as.data.frame() %>%
+    rownames_to_column() %>%
+    mutate(sd = apply(fcomm, 2, sd),
+           stinct = site1,
+           mu = colMeans(fcomm),
+           rating = stinct * mu) %>%
+    select(-site1)
+
+
+ggplot(trait_distinct, aes(y = reorder(rowname, stinct, desc = T), x = stinct)) +
+    geom_col() 
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#
