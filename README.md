@@ -1,2 +1,4 @@
 # v_mile_fun
-Functional Trait analysis of 2016-2017 NC ebibenthic community
+Trait analysis of 2016-2017 NC ebibenthic community
+
+Original community data is available [here on Coral Net](https://coralnet.ucsd.edu/source/466/).
