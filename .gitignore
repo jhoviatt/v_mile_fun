@@ -3,6 +3,9 @@
 .Rproj.user
 .RData
 Data/*
+!Data/Percent_cover.csv
+!Data/traits_clean.csv
+!Data/lacroce_metadata.csv
 Figs
 Tables
 Writing
