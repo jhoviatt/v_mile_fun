@@ -6,6 +6,10 @@ Data/*
 !Data/Percent_cover.csv
 !Data/traits_clean.csv
 !Data/lacroce_metadata.csv
+R/*
+!Five_mile_fun_manuscript.Rmd
+!Functions.R
+!ggsetup.R
 Figs
 Tables
 Writing
