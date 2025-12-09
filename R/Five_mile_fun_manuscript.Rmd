@@ -54,22 +54,31 @@ source('./R/ggsetup.R')
 #### Save Plots
 ```{r save plots, eval=FALSE, include=FALSE}
 # Code for exporting finalized figures using parameters set in ggsetup.R
-# Ecography:
-# Width: 945 (single column), 1476 (1.5 column) or 1961 (double column) pixels (at 300 dpi).
+# MEPS:
+# Type area = 169 x 225 mm, column width = 81 mm, gutter width: 7 mm
+    # single panel figure (with less text) → 81 mm width
+    # single panel figure (with more text or insets) → 105 mm width
+    # two panel figure (horizontally aligned) → 169 mm width
+    # two panel figure (vertically aligned) → 81 mm width
+    # multiple panel figure → 169 mm width
 
 my_ggsave("comm_over_time.tiff", spp_over_time_plot, 
-          height = 900, 
-          width = 1476)
+          height = 81, 
+          width = 105)
 my_ggsave("diversity_and_abundance.tiff", diversity_and_abundance_plot, 
-          height = 1200, 
-          width = 1476) 
+          height = 81, 
+          width = 105) 
 my_ggsave("trait_spaces.tiff", three_trait_space_plot, 
-          height = 2400, 
-          width = 1961) 
+          height = 190, 
+          width = 140) 
 my_ggsave("ordination.pdf", all_comms_plot, # pdf to allow editing in adobe
           height = 2400, 
           width = 1961,
-          device = 'pdf') 
+          device = 'pdf',
+          units = 'px') 
+my_ggsave("cormp.tiff", cormp_plot, # pdf to allow editing in adobe
+          height = 190, 
+          width = 140) 
 
 ```
 
@@ -80,12 +89,13 @@ my_ggsave("ordination.pdf", all_comms_plot, # pdf to allow editing in adobe
 cover_file <- "./Data/Percent_cover.csv"
 traits_file <- "./Data/traits_clean.csv"
 meta_file <- "./Data/lacroce_metadata.csv"
-
+cormp_file <- "./Data/CORMP_2016_2017.csv"
 # load in data to dataframes
 master_cover <- read.csv(cover_file) %>%
     filter(!is.na(Points))
 metadata <- read_csv(meta_file)
 traits <- read_csv(traits_file)
+cormp <- read_csv(cormp_file)
 
 ```
 
@@ -261,8 +271,7 @@ trait_dist <- trait_space %>%
 # generate PCoA trait space from gower matrix
 trait_pcoa <- pcoa(trait_dist)
 
-# set random seed for gg_repel labels to make them reproducible
-s = 5
+
 
 # extract axis variation
 pc1_trait_space <- trait_pcoa$values$Relative_eig[1] * 100
@@ -279,14 +288,26 @@ trait_plot <- trait_pcoa$vectors %>%
 trait_plot$Abund_16 <- colMeans(fcomm[rownames(filter(summer, Year == 2016)),], na.rm = T)
 trait_plot$Abund_17 <- colMeans(fcomm[rownames(filter(summer, Year == 2017)),], na.rm = T)
 
-# have to put it in a weird format for the density plot
-wts_16 <- uncount(trait_plot, weights = as.integer(Abund_16*100)) 
-wts_17 <- uncount(trait_plot, weights = as.integer(Abund_17*100)) 
 
-# set constants for kernal density plotting
-H <- c(.5,.5)
-COLOR_INTENSITY <- 1
-BINS <- 16
+# make some background noise data for nice kernal densities
+bg_vect <- seq(from = -.5, to = 5, by = 0.1)
+bg_data <- data.frame(rowname = NA, 
+                      Axis.1 = bg_vect, 
+                      Axis.2 = bg_vect, 
+                      Abund_16 = 0.00001, 
+                      Abund_17 = 0.00001)
+
+# have to put it in a weird format for the density plot
+wts_16 <- uncount(trait_plot, weights = as.integer(Abund_16*100)) %>%
+    mutate(Axis.1 = jitter(Axis.1, amount = 0.1),
+           Axis.2 = jitter(Axis.2, amount = 0.1)) %>%
+    rbind(bg_data)
+wts_17 <- uncount(trait_plot, weights = as.integer(Abund_17*100)) %>%
+    mutate(Axis.1 = jitter(Axis.1, amount = 0.1),
+           Axis.2 = jitter(Axis.2, amount = 0.1)) %>%
+    rbind(bg_data)
+
+
 
 # to make pretty labelling easy later
 trait_list <- colnames(trait_space)
@@ -322,20 +343,27 @@ trait_value_key <-
         "individual_simple_flagellated" = "flagellated larvae"
     )
 
+
 # generate vectors to overlay
+
 # first have to generate the pcoa again here using vegan's preferred function
 ef <- cmdscale(trait_dist, eig = T) %>% 
     envfit(trait_space)
 
-# clean up
-# scale vectors by both R and P value
+# scale vectors using built in envfit function
+# vector_scaling_coef = ordiArrowMul(ef)
+# nevermind it scales based on your plot window to fit. default is .75 of your plot limit so using that. 
+vector_scaling_coef = 0.75
+
+# clean up for nice ggplotting
 ef_vectors <- bind_cols(as.data.frame(ef$vectors$arrows),
                         as.data.frame(ef$vectors$r),
                         as.data.frame(ef$vectors$pval)) %>%
-    rename(R = `ef$vectors$r`,
+    rename(R2 = `ef$vectors$r`,
            P = `ef$vectors$pval`) %>%
-    mutate(Dim1_scaled = Dim1 * R * (1-P),
-           Dim2_scaled = Dim2 * R * (1-P)) %>%
+    mutate(Dim1_scaled = Dim1 * vector_scaling_coef * max(trait_plot$Axis.1),
+           Dim2_scaled = Dim2 * vector_scaling_coef * max(trait_plot$Axis.2),
+           Filter_var = R2 > quantile(R2, .25)) %>%
     rownames_to_column() %>%
     mutate(Trait_value = if_else(rowname == 'Temp_tmin', 'thermal minimum', 'thermal maximum'))
     
@@ -346,19 +374,35 @@ ef_centroids <- as.data.frame(ef$factors$centroids) %>%
 
 ef_factors <- bind_cols(as.data.frame(ef$factors$r),
                         as.data.frame(ef$factors$pval)) %>%
-    rename(R = `ef$factors$r`,
+    rename(R2 = `ef$factors$r`,
            P = `ef$factors$pval`) %>%
     rownames_to_column(var = 'Trait') %>%
     mutate(Trait = str_extract(Trait, paste(trait_list, collapse = '|'))) %>%
     left_join(ef_centroids) %>%
-    mutate(Dim1_scaled = Dim1 * R * (1-P) * 5,
-           Dim2_scaled = Dim2 * R * (1-P) * 5,
+    mutate(Vector_length = sqrt(Dim1^2 + Dim2^2),
+           Filter_var = Vector_length*R2 > quantile(Vector_length*R2, .25),
            Trait_value = str_remove(Trait_value, paste(trait_list, collapse = '|')),
            Trait_value_pretty = trait_value_key[Trait_value])
 
 ```
 
 ```{r plot trait space}
+
+# set constants for kernal density plotting
+H <- c(.4,.4)
+COLOR_INTENSITY <- 1 #0-1
+BINS <- 18
+
+# bounds of plot
+trait_space_xlim = c(-.45, .45)
+trait_space_ylim = c(-.4, .4)
+
+# label adjustments for vector plot
+label_nudge_x = 0.075 * sign(filter(ef_factors, Filter_var)$Dim1)
+label_nudge_y = 0.05 * sign(filter(ef_factors, Filter_var)$Dim2)
+
+# set random seed for gg_repel labels to make them reproducible
+s = 1
 
 # plot 2016
 trait_space_plot_16 <- trait_plot %>%
@@ -368,14 +412,15 @@ trait_space_plot_16 <- trait_plot %>%
                            alpha = 1, show.legend = F) +
     geom_point(aes(size = Abund_16), show.legend = F) +
     ggrepel::geom_label_repel(data = filter(trait_plot, rowname %in% top_spp$Name), 
-              aes(label = rowname),
-              color = 'black',
+              aes(label = rowname), 
+              color = 'black', fill = alpha(c("white"), 0.5),
               show.legend = F,
               min.segment.length = 0,
               size = ax_text_size/.pt,
               seed = s) +
-    scale_fill_grey(start = 1, end = 1 - COLOR_INTENSITY * max(trait_plot$Abund_16)^(1/2)) +
+    scale_fill_grey(start = 1, end = 1 - COLOR_INTENSITY * max(trait_plot$Abund_16)^(2/3)) +
     scale_color_manual(values = c('orange', 'maroon')) +
+    coord_cartesian(xlim = trait_space_xlim, ylim = trait_space_ylim) +
     theme(axis.text = element_blank(),
           axis.title = element_blank())
 
@@ -388,13 +433,14 @@ trait_space_plot_17 <- trait_plot %>%
     geom_point(aes(size = Abund_17), show.legend = F) +
     ggrepel::geom_label_repel(data = filter(trait_plot, rowname %in% top_spp$Name), 
               aes(label = rowname),
-              color = 'black',
+              color = 'black', fill = alpha(c("white"), 0.5),
               show.legend = F,
               min.segment.length = 0,
               size = ax_text_size/.pt,
               seed = s) +
-    scale_fill_grey(start = 1, end = 1 - COLOR_INTENSITY * max(trait_plot$Abund_17)^(1/2)) +
+    scale_fill_grey(start = 1, end = 1 - COLOR_INTENSITY * max(trait_plot$Abund_17)^(2/3)) +
     scale_color_manual(values = c('orange', 'maroon')) +
+    coord_cartesian(xlim = trait_space_xlim, ylim = trait_space_ylim) +
     theme(axis.text = element_blank(),
           axis.title = element_blank())
 
@@ -403,28 +449,34 @@ trait_space_plot_vectors <- trait_plot %>%
     ggplot(aes(x = Axis.1, y = Axis.2, color = rowname %in% colnames(falgae))) +
     geom_point(size = 2, show.legend = F) +
     geom_segment(data = ef_vectors, 
-                 aes(x = 0, y = 0, xend = Dim1_scaled, yend = Dim2_scaled, color = NA), 
+                 aes(x = 0, y = 0, xend = Dim1_scaled, yend = Dim2_scaled, alpha = Filter_var), 
+                 color = 'black', 
                  arrow = arrow(length = unit(2, 'mm'), type = 'closed'), show.legend = F) +
     geom_segment(data = ef_factors, 
-                 aes(x = 0, y = 0, xend = Dim1_scaled, yend = Dim2_scaled, color = NA), 
-                 arrow = arrow(length = unit(2, 'mm'), type = 'closed'), show.legend = F) +
-    ggrepel::geom_label_repel(data = filter(ef_vectors, 
-                                            sqrt(Dim1_scaled^2 + Dim2_scaled^2) > .3),
+                 aes(x = 0, y = 0, xend = Dim1, yend = Dim2, alpha = Filter_var), 
+                 color = 'black', 
+                 arrow = arrow(length = unit(2, 'mm'), type = 'open'), show.legend = F) +
+    ggrepel::geom_label_repel(data = filter(ef_vectors, Filter_var),
                               aes(label = Trait_value, x = Dim1_scaled, y = Dim2_scaled),
-                              color = 'black',
+                              color = 'black', fill = alpha(c("white"), 0.75),
                               show.legend = F,
                               min.segment.length = 0,
                               size = ax_text_size/.pt,
                               seed = s) +
-    ggrepel::geom_label_repel(data = filter(ef_factors, 
-                                            sqrt(Dim1_scaled^2 + Dim2_scaled^2) > .3),
-                              aes(label = Trait_value_pretty, x = Dim1_scaled, y = Dim2_scaled),
-                              color = 'black',
+    ggrepel::geom_label_repel(data = filter(ef_factors, Filter_var),
+                              aes(label = Trait_value_pretty, 
+                                  x = Dim1, y = Dim2),
+                              color = 'black', fill = alpha(c("white"), 0.75),
                               show.legend = F,
                               min.segment.length = 0,
                               size = ax_text_size/.pt,
-                              seed = s) +
+                              seed = s,
+                              position = ggrepel::position_nudge_repel(x = label_nudge_x,
+                                                                       y = label_nudge_y),
+                              force = 20, force_pull = 1, 
+                              max.time = 5) +
     scale_color_manual(values = c('orange', 'maroon')) +
+    coord_cartesian(xlim = trait_space_xlim, ylim = trait_space_ylim) +
     theme(axis.text = element_blank(),
           axis.title = element_blank())
 
@@ -433,12 +485,12 @@ three_trait_space_plot <- ggarrange(trait_space_plot_16,
                                   trait_space_plot_17, 
                                   trait_space_plot_vectors,
                                   ncol = 1, 
-                                  labels = c('2016', '2017'), 
-                                  label.x = .8, 
+                                  labels = c('A: 2016', 'B: 2017', 'C          '), 
+                                  label.x = -0.03, 
                                   label.y = 1) %>%
     annotate_figure(left = text_grob(paste('PCoA Axis 2: ', round(pc2_trait_space, 2), '%'), size = lab_text_size, rot = 90), 
                     bottom = text_grob(paste('PCoA Axis 1:', round(pc1_trait_space, 2), '%'), size = lab_text_size))
-
+three_trait_space_plot
 ```
 
 ```{r prep comm plots}
@@ -757,7 +809,40 @@ diversity_and_abundance_plot <- ggarrange(diversity_plot,
 ```
 
 
+```{r cormp plot}
 
+cormp_clean <- cormp %>%
+    separate(Date_Time, into = c('Date', 'Time'), sep = ' ') %>%
+    select(Date, Water_temp_F, Salinity_ppt, Wave_ht_ft) %>%
+    group_by(Date) %>%
+    mutate(across(c(Water_temp_F, Salinity_ppt, Wave_ht_ft), ~mean(.x, na.rm=T))) %>%
+    ungroup() %>%
+    distinct() %>%
+    mutate(Date = mdy(Date),
+           Day = day(Date),
+           Month_num = month(Date),
+           Month = month(Date, label = T),
+           Plot_date = make_date(month = Month_num, day = Day),
+           Year = year(Date)) %>%
+    filter(Month_num > 5 & Month_num < 9)
+    
+cormp_plot <- cormp_clean %>% 
+    pivot_longer(cols = c(Water_temp_F, Salinity_ppt, Wave_ht_ft), 
+                 names_to = 'Variable', 
+                 values_to = 'Value') %>%
+    filter((Variable == 'Water_temp_F' & Value > 60) |
+               (Variable == 'Salinity_ppt' & Value > 20) |
+               (Variable == 'Wave_ht_ft')) %>%
+
+    ggplot(aes(x = Plot_date, y = Value, color = as.factor(Year))) +
+    geom_point(alpha = 0.5) +
+    geom_smooth()  +
+    labs(color = "Year", y='') +
+    facet_wrap(~Variable, scales = 'free_y', ncol = 1) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+cormp_plot
+
+```
 
 
 
