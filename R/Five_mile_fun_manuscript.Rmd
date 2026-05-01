@@ -107,12 +107,15 @@ cover_file <- "./Data/Percent_cover.csv"
 traits_file <- "./Data/traits_clean.csv"
 meta_file <- "./Data/lacroce_metadata.csv"
 cormp_file <- "./Data/CORMP_2016_2017.csv"
+italics_file <- "./Data/spp_italics.csv"
+
 # load in data to dataframes
 master_cover <- read.csv(cover_file) %>%
     filter(!is.na(Points))
 metadata <- read_csv(meta_file)
 traits <- read_csv(traits_file)
 cormp <- read_csv(cormp_file)
+italics_key <- read_csv(italics_file)
 
 ```
 
@@ -299,7 +302,14 @@ trait_plot <- trait_pcoa$vectors %>%
     as.data.frame() %>%
     rownames_to_column() %>%
     filter(rowname %in% colnames(fcomm)) %>%
-    select(rowname, Axis.1, Axis.2) 
+    select(rowname, Axis.1, Axis.2) %>%
+    left_join(italics_key, join_by("rowname" == "Species")) %>%
+    mutate(Name_pretty = if_else(Italics,
+                                 paste("italic('",
+                                       rowname,
+                                       "')", sep = ""),
+                                 str_replace_all(rowname, " ", "~"))) %>%
+    select(-Italics)
 
 # get species abundances in each year for point sizing
 trait_plot$Abund_16 <- colMeans(fcomm[rownames(filter(summer, Year == 2016)),], na.rm = T)
@@ -311,6 +321,7 @@ bg_vect <- seq(from = -.5, to = 5, by = 0.1)
 bg_data <- data.frame(rowname = NA, 
                       Axis.1 = bg_vect, 
                       Axis.2 = bg_vect, 
+                      Name_pretty = NA,
                       Abund_16 = 0.00001, 
                       Abund_17 = 0.00001)
 
@@ -429,12 +440,13 @@ trait_space_plot_16 <- trait_plot %>%
                            alpha = 1, show.legend = F) +
     geom_point(aes(size = Abund_16), show.legend = F) +
     ggrepel::geom_label_repel(data = filter(trait_plot, rowname %in% top_spp$Name), 
-              aes(label = rowname), 
+              aes(label = Name_pretty), 
               color = 'black', fill = alpha(c("white"), 0.5),
               show.legend = F,
               min.segment.length = 0,
               size = ax_text_size/.pt,
-              seed = s) +
+              seed = s,
+              parse = T) +
     scale_fill_grey(start = 1, end = 1 - COLOR_INTENSITY * max(trait_plot$Abund_16)^(2/3)) +
     scale_color_manual(values = c('orange', 'maroon')) +
     coord_cartesian(xlim = trait_space_xlim, ylim = trait_space_ylim) +
@@ -449,12 +461,13 @@ trait_space_plot_17 <- trait_plot %>%
                            alpha = 1, show.legend = F) +
     geom_point(aes(size = Abund_17), show.legend = F) +
     ggrepel::geom_label_repel(data = filter(trait_plot, rowname %in% top_spp$Name), 
-              aes(label = rowname),
+              aes(label = Name_pretty),
               color = 'black', fill = alpha(c("white"), 0.5),
               show.legend = F,
               min.segment.length = 0,
               size = ax_text_size/.pt,
-              seed = s) +
+              seed = s,
+              parse = T) +
     scale_fill_grey(start = 1, end = 1 - COLOR_INTENSITY * max(trait_plot$Abund_17)^(2/3)) +
     scale_color_manual(values = c('orange', 'maroon')) +
     coord_cartesian(xlim = trait_space_xlim, ylim = trait_space_ylim) +
@@ -560,7 +573,14 @@ pcoa_contrib <- wascores(comm_pcoa, fcomm) %>%
     as.data.frame() %>%
     select(Axis.1, Axis.2) %>%
     rownames_to_column(var = 'Species') %>%
-    filter(Species %in% top_spp$Name)
+    filter(Species %in% top_spp$Name) %>%
+    left_join(italics_key) %>%
+    mutate(Name_pretty = if_else(Italics,
+                                 paste("italic('",
+                                       Species,
+                                       "')", sep = ""),
+                                 str_replace_all(Species, " ", "~"))) %>%
+    select(-Italics)
 
 ```
 
@@ -592,11 +612,17 @@ mfa_cwm_plot <- ggplot() +
                  show.legend = F) +
     geom_segment(data = mfa_contrib, 
                  aes(x = 0, y = 0, xend = Dim.1 * 2, yend = Dim.2 * 2), 
-                  arrow = arrow(length = unit(2, 'mm'), type = 'closed'), show.legend = F) +
+                 arrow = arrow(length = unit(2, 'mm'), 
+                               type = 'closed'), show.legend = F) +
     ggrepel::geom_label_repel(data = mfa_contrib,
-               aes(x = Dim.1 * 2 + 0.5, y = Dim.2 * 2 + 0.5, label = Trait_value_pretty, fill = Trait),
-               show.legend = T, size = small_text_size/.pt,
-               seed = 3, min.segment.length = 10) +
+                              aes(x = Dim.1 * 2 + 0.5, 
+                                  y = Dim.2 * 2 + 0.5, 
+                                  label = Trait_value_pretty, 
+                                  fill = Trait),
+                              show.legend = T, 
+                              size = small_text_size/.pt,
+                              seed = 3, 
+                              min.segment.length = 10) +
     coord_cartesian(xlim = c(-4, 3.5), ylim = c(-4, 4)) +
     scale_fill_few() +
     theme(axis.title = element_blank())
@@ -619,8 +645,10 @@ cwm_plot <- ggarrange(cwm_1_density, NA, mfa_cwm_plot, cwm_2_density,
           widths = c(4,1),
           align = 'hv',
           common.legend = T) %>%
-    annotate_figure(left = text_grob(paste('MFA Axis 2: ', round(dim2_mfa, 2), '%'), size = lab_text_size, rot = 90), 
-                    bottom = text_grob(paste('MFA Axis 1:', round(dim1_mfa, 2), '%'), size = lab_text_size))
+    annotate_figure(left = text_grob(paste('MFA Axis 2: ', round(dim2_mfa, 2), '%'), 
+                                     size = lab_text_size, rot = 90), 
+                    bottom = text_grob(paste('MFA Axis 1:', round(dim1_mfa, 2), '%'), 
+                                       size = lab_text_size))
 
 # plot PCoA
 pcoa_comm_plot <- ggplot() +
@@ -632,12 +660,21 @@ pcoa_comm_plot <- ggplot() +
                  linetype = 2,
                  show.legend = F) +
     geom_segment(data = pcoa_contrib, 
-                 aes(x = 0, y = 0, xend = Axis.1 * 2, yend = Axis.2 * 2), 
-                  arrow = arrow(length = unit(2, 'mm'), type = 'closed'), show.legend = F) +
+                 aes(x = 0, y = 0, 
+                     xend = Axis.1 * 2, 
+                     yend = Axis.2 * 2), 
+                 arrow = arrow(length = unit(2, 'mm'), type = 'closed'), 
+                 show.legend = F) +
     ggrepel::geom_label_repel(data = pcoa_contrib,
-               aes(x = Axis.1 * 2, y = Axis.2 * 2, label = Species, fill = Species %in% colnames(falgae)),
-               show.legend = T, size = small_text_size/.pt,
-               seed = 3, min.segment.length = 10) +
+                              aes(x = Axis.1 * 2, 
+                                  y = Axis.2 * 2, 
+                                  label = Name_pretty, 
+                                  fill = Species %in% colnames(falgae)),
+                              show.legend = T, 
+                              size = small_text_size/.pt,
+                              seed = 3, 
+                              min.segment.length = 10,
+                              parse = T) +
     coord_cartesian(xlim = c(-.7, .7), ylim = c(-.6, .5)) +
     scale_fill_manual(name = NULL, 
                       labels = c('Invertebrates', 'Algae'), 
@@ -671,6 +708,7 @@ all_comms_plot <- ggarrange(comm_plot, cwm_plot,
                             align = 'h',
                             ncol = 1,
                             common.legend = F)
+all_comms_plot
 
 ```
 
