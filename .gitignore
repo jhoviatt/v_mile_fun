@@ -7,6 +7,7 @@ Data/*
 !Data/traits_clean.csv
 !Data/lacroce_metadata.csv
 !Data/CORMP_2016_2017.csv
+!Data/spp_italics.csv
 R/*
 !Five_mile_fun_manuscript.Rmd
 !Functions.R
