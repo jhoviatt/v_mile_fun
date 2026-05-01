@@ -62,24 +62,41 @@ source('./R/ggsetup.R')
     # two panel figure (vertically aligned) → 81 mm width
     # multiple panel figure → 169 mm width
 
-my_ggsave("comm_over_time.tiff", spp_over_time_plot, 
-          height = 81, 
-          width = 105)
-my_ggsave("diversity_and_abundance.tiff", diversity_and_abundance_plot, 
-          height = 81, 
-          width = 105) 
-my_ggsave("trait_spaces.tiff", three_trait_space_plot, 
-          height = 190, 
-          width = 140) 
-my_ggsave("ordination.pdf", all_comms_plot, # pdf to allow editing in adobe
-          height = 2400, 
-          width = 1961,
-          device = 'pdf',
-          units = 'px') 
-my_ggsave("cormp.tiff", cormp_plot, # pdf to allow editing in adobe
-          height = 190, 
-          width = 140) 
+# my_ggsave("comm_over_time.tiff", spp_over_time_plot, 
+#           height = 81, 
+#           width = 105)
+# my_ggsave("diversity_and_abundance.tiff", diversity_and_abundance_plot, 
+#           height = 81, 
+#           width = 105) 
+# my_ggsave("trait_spaces.tiff", three_trait_space_plot, 
+#           height = 190, 
+#           width = 140) 
+# my_ggsave("ordination.pdf", all_comms_plot, # pdf to allow editing in adobe
+#           height = 2400, 
+#           width = 1961,
+#           device = 'pdf',
+#           units = 'px') 
+# my_ggsave("cormp.tiff", cormp_plot, # pdf to allow editing in adobe
+#           height = 190, 
+#           width = 140) 
 
+my_ggsave("M15131_figure_2.tif", spp_over_time_plot,
+          height = 81,
+          width = 105)
+my_ggsave("M15131_figure_5.tif", diversity_and_abundance_plot,
+          height = 81,
+          width = 105)
+my_ggsave("M15131_figure_3.tif", three_trait_space_plot,
+          height = 190,
+          width = 140)
+# my_ggsave("ordination.pdf", all_comms_plot, # pdf to allow editing in adobe
+#           height = 2400,
+#           width = 1961,
+#           device = 'pdf',
+#           units = 'px')
+my_ggsave("M15131_figureS2.tif", cormp_plot, # pdf to allow editing in adobe
+          height = 190,
+          width = 140)
 ```
 
 ### Load data
@@ -803,8 +820,8 @@ abundance_plot <- ggplot(filter(diversity_plotting, Index %in% c('Total_alg', 'T
     facet_wrap(~ Index, labeller = div_labs) 
 
 # combine diversity and abundance plot
-diversity_and_abundance_plot <- ggarrange(diversity_plot, 
-                                          abundance_plot,
+diversity_and_abundance_plot <- ggarrange(abundance_plot,
+                                          diversity_plot,
                                           ncol = 1,labels = c('A', 'B'))
 ```
 
